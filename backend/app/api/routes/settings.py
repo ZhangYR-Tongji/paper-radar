@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.fetch import FetchCursor
 from app.models.keyword_group import KeywordGroup
 from app.models.scoring import ScoringWeights
 from app.models.source_config import SourceConfig
@@ -82,12 +83,14 @@ def delete_keyword_group(group_id: int, db: Session = Depends(get_db)) -> None:
     group = db.get(KeywordGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword group not found")
+    db.query(FetchCursor).filter(FetchCursor.keyword_group_id == group_id).delete()
     db.delete(group)
     db.commit()
 
 
 @router.post("/keyword-groups/reset-defaults", response_model=list[KeywordGroupRead])
 def reset_keyword_group_defaults(db: Session = Depends(get_db)) -> list[KeywordGroup]:
+    db.query(FetchCursor).delete()
     db.query(KeywordGroup).delete()
     for group_data in DEFAULT_KEYWORD_GROUPS:
         db.add(KeywordGroup(**group_data))

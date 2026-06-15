@@ -1,7 +1,20 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 import { PageHeader } from "@/components/page-header";
-import { feedbackHistory } from "@/lib/mock-data";
+import { apiGet, mapFeedbackItem } from "@/lib/api";
+import type { FeedbackItem } from "@/lib/types";
 
 export default function FeedbackPage() {
+  const [history, setHistory] = useState<FeedbackItem[]>([]);
+
+  useEffect(() => {
+    apiGet<Record<string, unknown>[]>("/feedback/history")
+      .then((data) => setHistory(data.map(mapFeedbackItem)))
+      .catch(console.error);
+  }, []);
+
   return (
     <>
       <PageHeader
@@ -20,13 +33,13 @@ export default function FeedbackPage() {
             </tr>
           </thead>
           <tbody>
-            {feedbackHistory.map((item) => (
+            {history.map((item) => (
               <tr key={item.id} className="border-t border-zinc-200">
-                <td className="px-4 py-3 font-semibold">{item.rating}</td>
+                <td className="px-4 py-3 font-semibold">{item.rating ?? "-"}</td>
                 <td className="px-4 py-3 text-zinc-950">{item.paperTitle}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
-                    {item.tags.map((tag) => (
+                    {[...item.positiveTags, ...item.negativeTags].map((tag) => (
                       <span
                         key={tag}
                         className="rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-800"
@@ -40,6 +53,13 @@ export default function FeedbackPage() {
                 <td className="px-4 py-3 text-zinc-500">{item.updatedAt}</td>
               </tr>
             ))}
+            {!history.length ? (
+              <tr>
+                <td className="px-4 py-6 text-zinc-500" colSpan={5}>
+                  暂无反馈记录。
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

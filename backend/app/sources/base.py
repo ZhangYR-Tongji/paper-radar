@@ -34,3 +34,15 @@ class BaseSourceAdapter(ABC):
         date_to=None,
     ) -> list[PaperResult]:
         raise NotImplementedError
+
+
+def clean_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return " ".join(value.split())
+
+
+def extract_year(value: date | None) -> int | None:
+    if not value:
+        return None
+    return value.year

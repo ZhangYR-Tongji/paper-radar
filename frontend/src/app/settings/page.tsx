@@ -1,27 +1,140 @@
-import { RotateCcw, Save } from "lucide-react";
+"use client";
+
+import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
-import { keywordGroups, sourceConfigs } from "@/lib/mock-data";
+import {
+  apiGet,
+  apiSend,
+  mapKeywordGroup,
+  mapSourceConfig,
+} from "@/lib/api";
+import type { KeywordGroup, SourceConfig } from "@/lib/types";
+
+const splitLines = (value: string) =>
+  value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 export default function SettingsPage() {
+  const [sources, setSources] = useState<SourceConfig[]>([]);
+  const [groups, setGroups] = useState<KeywordGroup[]>([]);
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadSettings = async () => {
+    const [sourceData, groupData, scoringData] = await Promise.all([
+      apiGet<Record<string, unknown>[]>("/settings/sources"),
+      apiGet<Record<string, unknown>[]>("/settings/keyword-groups"),
+      apiGet<Record<string, unknown>>("/settings/scoring-weights"),
+    ]);
+    setSources(sourceData.map(mapSourceConfig));
+    setGroups(groupData.map(mapKeywordGroup));
+    setWeights({
+      topic_weight: Number(scoringData.topic_weight ?? 0),
+      method_weight: Number(scoringData.method_weight ?? 0),
+      venue_weight: Number(scoringData.venue_weight ?? 0),
+      freshness_weight: Number(scoringData.freshness_weight ?? 0),
+      user_preference_weight: Number(scoringData.user_preference_weight ?? 0),
+      negative_filter_weight: Number(scoringData.negative_filter_weight ?? 0),
+    });
+  };
+
+  useEffect(() => {
+    loadSettings().catch((err: Error) => setMessage(err.message));
+  }, []);
+
+  const updateSource = async (id: number, patch: Partial<SourceConfig>) => {
+    const payload = {
+      display_name: patch.displayName,
+      description: patch.description,
+      is_enabled: patch.isEnabled,
+      daily_limit: patch.dailyLimit,
+      participates_in_ranking: patch.participatesInRanking,
+      metadata_only: patch.metadataOnly,
+    };
+    await apiSend(`/settings/sources/${id}`, "PUT", payload);
+    await loadSettings();
+    setMessage("数据源已保存");
+  };
+
+  const updateGroup = async (group: KeywordGroup) => {
+    await apiSend(`/settings/keyword-groups/${group.id}`, "PUT", {
+      name: group.name,
+      description: group.description,
+      is_enabled: group.isEnabled,
+      priority_weight: group.priorityWeight,
+      positive_keywords: group.positiveKeywords,
+      negative_keywords: group.negativeKeywords,
+      required_keywords: group.requiredKeywords,
+      optional_keywords: group.optionalKeywords,
+    });
+    await loadSettings();
+    setMessage("关键词组已保存");
+  };
+
+  const createGroup = async () => {
+    await apiSend("/settings/keyword-groups", "POST", {
+      name: `New keyword group ${Date.now()}`,
+      description: "",
+      is_enabled: true,
+      priority_weight: 1,
+      positive_keywords: [],
+      negative_keywords: [],
+      required_keywords: [],
+      optional_keywords: [],
+      related_tags: [],
+    });
+    await loadSettings();
+  };
+
+  const deleteGroup = async (id: number) => {
+    await apiSend(`/settings/keyword-groups/${id}`, "DELETE");
+    await loadSettings();
+  };
+
+  const resetDefaults = async () => {
+    await apiSend("/settings/keyword-groups/reset-defaults", "POST");
+    await loadSettings();
+  };
+
+  const saveWeights = async () => {
+    await apiSend("/settings/scoring-weights", "PUT", weights);
+    setMessage("评分权重已保存");
+  };
+
   return (
     <>
       <PageHeader
         title="设置"
-        description="配置数据源、关键词组和评分权重。当前页面已按后端 Settings API 的数据结构组织。"
+        description="配置数据源、关键词组和评分权重。所有 Fetch 逻辑都会从这些配置读取。"
         action={
           <div className="flex gap-2">
-            <button className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={resetDefaults}
+            >
               <RotateCcw size={16} aria-hidden="true" />
               重置默认
             </button>
-            <button className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
+              onClick={saveWeights}
+            >
               <Save size={16} aria-hidden="true" />
-              保存
+              保存权重
             </button>
           </div>
         }
       />
+
+      {message ? (
+        <div className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {message}
+        </div>
+      ) : null}
 
       <section className="mb-8">
         <h2 className="mb-3 text-base font-semibold text-zinc-950">数据源</h2>
@@ -37,10 +150,16 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody>
-              {sourceConfigs.map((source) => (
+              {sources.map((source) => (
                 <tr key={source.id} className="border-t border-zinc-200">
                   <td className="px-4 py-3">
-                    <input type="checkbox" defaultChecked={source.isEnabled} />
+                    <input
+                      type="checkbox"
+                      checked={source.isEnabled}
+                      onChange={(event) =>
+                        updateSource(source.id, { isEnabled: event.target.checked })
+                      }
+                    />
                   </td>
                   <td className="px-4 py-3 font-medium text-zinc-950">
                     {source.displayName}
@@ -49,14 +168,31 @@ export default function SettingsPage() {
                   <td className="px-4 py-3">
                     <input
                       className="h-9 w-24 rounded-md border border-zinc-200 px-2"
-                      defaultValue={source.dailyLimit}
+                      value={source.dailyLimit}
                       type="number"
+                      onChange={(event) =>
+                        setSources((current) =>
+                          current.map((item) =>
+                            item.id === source.id
+                              ? { ...item, dailyLimit: Number(event.target.value) }
+                              : item,
+                          ),
+                        )
+                      }
+                      onBlur={() =>
+                        updateSource(source.id, { dailyLimit: source.dailyLimit })
+                      }
                     />
                   </td>
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
-                      defaultChecked={source.participatesInRanking}
+                      checked={source.participatesInRanking}
+                      onChange={(event) =>
+                        updateSource(source.id, {
+                          participatesInRanking: event.target.checked,
+                        })
+                      }
                     />
                   </td>
                 </tr>
@@ -67,39 +203,29 @@ export default function SettingsPage() {
       </section>
 
       <section className="mb-8">
-        <h2 className="mb-3 text-base font-semibold text-zinc-950">关键词组</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-semibold text-zinc-950">关键词组</h2>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            onClick={createGroup}
+          >
+            <Plus size={15} aria-hidden="true" />
+            新建
+          </button>
+        </div>
         <div className="grid gap-4 lg:grid-cols-3">
-          {keywordGroups.map((group) => (
-            <article
+          {groups.map((group) => (
+            <KeywordGroupEditor
               key={group.id}
-              className="rounded-md border border-zinc-200 bg-white p-4 shadow-sm"
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-zinc-950">{group.name}</h3>
-                  <p className="mt-1 text-sm leading-5 text-zinc-500">
-                    {group.description}
-                  </p>
-                </div>
-                <input type="checkbox" defaultChecked={group.isEnabled} />
-              </div>
-              <label className="mb-2 block text-sm font-medium text-zinc-700">
-                优先权重
-                <input
-                  className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
-                  type="number"
-                  step="0.1"
-                  defaultValue={group.priorityWeight}
-                />
-              </label>
-              <label className="block text-sm font-medium text-zinc-700">
-                正向关键词
-                <textarea
-                  className="mt-1 min-h-24 w-full rounded-md border border-zinc-200 p-2 text-sm leading-5"
-                  defaultValue={group.positiveKeywords.join("\n")}
-                />
-              </label>
-            </article>
+              group={group}
+              onChange={(next) =>
+                setGroups((current) =>
+                  current.map((item) => (item.id === next.id ? next : item)),
+                )
+              }
+              onSave={updateGroup}
+              onDelete={deleteGroup}
+            />
           ))}
         </div>
       </section>
@@ -108,25 +234,119 @@ export default function SettingsPage() {
         <h2 className="mb-3 text-base font-semibold text-zinc-950">评分权重</h2>
         <div className="grid gap-3 rounded-md border border-zinc-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-6">
           {[
-            ["主题", "0.30"],
-            ["方法", "0.20"],
-            ["来源", "0.15"],
-            ["新鲜度", "0.15"],
-            ["用户偏好", "0.10"],
-            ["负向过滤", "0.10"],
-          ].map(([label, value]) => (
-            <label key={label} className="text-sm font-medium text-zinc-700">
+            ["topic_weight", "主题"],
+            ["method_weight", "方法"],
+            ["venue_weight", "来源"],
+            ["freshness_weight", "新鲜度"],
+            ["user_preference_weight", "用户偏好"],
+            ["negative_filter_weight", "负向过滤"],
+          ].map(([key, label]) => (
+            <label key={key} className="text-sm font-medium text-zinc-700">
               {label}
               <input
                 className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
-                defaultValue={value}
+                value={weights[key] ?? 0}
                 type="number"
                 step="0.01"
+                onChange={(event) =>
+                  setWeights((current) => ({
+                    ...current,
+                    [key]: Number(event.target.value),
+                  }))
+                }
               />
             </label>
           ))}
         </div>
       </section>
     </>
+  );
+}
+
+function KeywordGroupEditor({
+  group,
+  onChange,
+  onSave,
+  onDelete,
+}: {
+  group: KeywordGroup;
+  onChange: (group: KeywordGroup) => void;
+  onSave: (group: KeywordGroup) => void;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <article className="rounded-md border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <label className="flex-1 text-sm font-medium text-zinc-700">
+          名称
+          <input
+            className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
+            value={group.name}
+            onChange={(event) => onChange({ ...group, name: event.target.value })}
+          />
+        </label>
+        <input
+          className="mt-7"
+          type="checkbox"
+          checked={group.isEnabled}
+          onChange={(event) => onChange({ ...group, isEnabled: event.target.checked })}
+        />
+      </div>
+      <label className="mb-2 block text-sm font-medium text-zinc-700">
+        说明
+        <textarea
+          className="mt-1 min-h-16 w-full rounded-md border border-zinc-200 p-2 text-sm leading-5"
+          value={group.description}
+          onChange={(event) => onChange({ ...group, description: event.target.value })}
+        />
+      </label>
+      <label className="mb-2 block text-sm font-medium text-zinc-700">
+        优先权重
+        <input
+          className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
+          type="number"
+          step="0.1"
+          value={group.priorityWeight}
+          onChange={(event) =>
+            onChange({ ...group, priorityWeight: Number(event.target.value) })
+          }
+        />
+      </label>
+      {[
+        ["positiveKeywords", "正向关键词"],
+        ["negativeKeywords", "负向关键词"],
+        ["requiredKeywords", "必须关键词"],
+        ["optionalKeywords", "可选关键词"],
+      ].map(([key, label]) => (
+        <label key={key} className="mb-2 block text-sm font-medium text-zinc-700">
+          {label}
+          <textarea
+            className="mt-1 min-h-20 w-full rounded-md border border-zinc-200 p-2 text-sm leading-5"
+            value={(group[key as keyof KeywordGroup] as string[]).join("\n")}
+            onChange={(event) =>
+              onChange({
+                ...group,
+                [key]: splitLines(event.target.value),
+              })
+            }
+          />
+        </label>
+      ))}
+      <div className="mt-3 flex gap-2">
+        <button
+          className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-zinc-900 px-3 text-sm font-semibold text-white hover:bg-zinc-800"
+          onClick={() => onSave(group)}
+        >
+          <Save size={15} aria-hidden="true" />
+          保存
+        </button>
+        <button
+          className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-200 px-3 text-zinc-600 hover:bg-zinc-50"
+          onClick={() => onDelete(group.id)}
+        >
+          <Trash2 size={15} aria-label="删除" />
+        </button>
+      </div>
+    </article>
   );
 }
