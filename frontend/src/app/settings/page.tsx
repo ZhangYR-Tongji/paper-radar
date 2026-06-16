@@ -12,11 +12,10 @@ import {
 } from "@/lib/api";
 import type { KeywordGroup, SourceConfig } from "@/lib/types";
 
-const splitLines = (value: string) =>
-  value
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean);
+const splitKeywordDraft = (value: string) => value.split("\n");
+
+const normalizeKeywords = (keywords: string[]) =>
+  keywords.map((item) => item.trim()).filter(Boolean);
 
 export default function SettingsPage() {
   const [sources, setSources] = useState<SourceConfig[]>([]);
@@ -66,10 +65,10 @@ export default function SettingsPage() {
       description: group.description,
       is_enabled: group.isEnabled,
       priority_weight: group.priorityWeight,
-      positive_keywords: group.positiveKeywords,
-      negative_keywords: group.negativeKeywords,
-      required_keywords: group.requiredKeywords,
-      optional_keywords: group.optionalKeywords,
+      positive_keywords: normalizeKeywords(group.positiveKeywords),
+      negative_keywords: normalizeKeywords(group.negativeKeywords),
+      required_keywords: normalizeKeywords(group.requiredKeywords),
+      optional_keywords: normalizeKeywords(group.optionalKeywords),
     });
     await loadSettings();
     setMessage("关键词组已保存");
@@ -335,7 +334,7 @@ function KeywordGroupEditor({
             onChange={(event) =>
               onChange({
                 ...group,
-                [key]: splitLines(event.target.value),
+                [key]: splitKeywordDraft(event.target.value),
               })
             }
           />
