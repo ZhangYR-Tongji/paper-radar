@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Paper Radar",
-  description: "Local-first academic paper search and ranking.",
+  description: "本地运行、用户自定义的科研论文检索与排序",
 };
 
 export default function RootLayout({

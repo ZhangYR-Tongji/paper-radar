@@ -44,7 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 Paper Radar
               </span>
               <span className="block text-sm text-zinc-500">
-                本地优先论文检索与排序
+                本地运行、用户自定义的科研论文检索与排序
               </span>
             </span>
           </Link>

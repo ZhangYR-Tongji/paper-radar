@@ -1,8 +1,8 @@
 # Paper Radar
 
-GitHub repository: https://github.com/ZhangYR-Tongji/design-ai-paper-radar
+GitHub repository: https://github.com/ZhangYR-Tongji/paper-radar
 
-本项目是一个本地优先的通用科研论文检索与排序工具。用户自行配置数据源、关键词组和评分权重，系统将配置保存在本地数据库中，下次启动自动加载。MVP 阶段不接入 LLM，不做自动摘要，不分析 PDF 全文。
+本项目是一个本地运行、用户自定义的科研论文检索与排序工具。用户自行配置数据源、关键词组和评分权重，系统将配置保存在本地数据库中，下次启动自动加载。MVP 阶段不接入 LLM，不做自动摘要，不分析 PDF 全文。
 
 ## 目录结构
 
