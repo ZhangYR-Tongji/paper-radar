@@ -31,8 +31,8 @@ export default function FetchRunPage() {
   return (
     <>
       <PageHeader
-        title={`Fetch Run #${params.id}`}
-        description="每个 source × keyword group 都会单独记录状态，只有成功项会推进 cursor。"
+        title={`抓取记录 #${params.id}`}
+        description="用于排查一次检索运行的过程、错误和去重结果。每个数据源 × 关键词组都会单独记录状态，只有成功项会推进 cursor。"
       />
 
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
@@ -97,7 +97,7 @@ export default function FetchRunPage() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-base font-semibold text-zinc-950">新增论文</h2>
+        <h2 className="mb-3 text-base font-semibold text-zinc-950">本次新增论文</h2>
         {run?.papers.length ? (
           <div className="space-y-4">
             {run.papers.map((paper) => (

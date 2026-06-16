@@ -1,6 +1,7 @@
 "use client";
 
 import { Play, RotateCw } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Metric } from "@/components/metric";
@@ -115,14 +116,24 @@ export default function Home() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-zinc-950">
-              最近一次 Fetch
+              最近一次检索
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {latestRun
-                ? `#${latestRun.id} · ${latestRun.requestedFrom ?? "-"} 至 ${
+              {latestRun ? (
+                <>
+                  <Link
+                    className="font-medium text-emerald-700 hover:text-emerald-800"
+                    href={`/fetch-runs/${latestRun.id}`}
+                  >
+                    抓取记录 #{latestRun.id}
+                  </Link>
+                  {` · ${latestRun.requestedFrom ?? "-"} 至 ${
                     latestRun.requestedTo ?? "-"
-                  } · ${latestRun.status}`
-                : "尚未执行 fetch"}
+                  } · ${latestRun.status}`}
+                </>
+              ) : (
+                "尚未执行检索"
+              )}
             </p>
           </div>
           <button

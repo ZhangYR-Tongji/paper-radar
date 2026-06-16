@@ -56,7 +56,7 @@ Implement these pages:
 /library                Saved / read / core papers
 /feedback               Rating history
 /search                 Local database search
-/fetch-runs/[id]        Fetch run details
+/fetch-runs/[id]        Fetch run details, opened from a specific latest/recent run
 ```
 
 ## 4. Configurable Data Sources
@@ -640,6 +640,7 @@ latest fetch summary
 start fetch button
 fetch status/progress
 paper list from latest fetch run
+link from latest run id to fetch run detail
 filters for latest run / last 7 days / last 30 days / all unread
 ```
 
@@ -657,6 +658,8 @@ errors
 source × keyword group item status
 new paper list
 ```
+
+Fetch run detail is a process/log page, not a primary search surface. Do not place a fixed fetch-run link in the main navigation.
 
 ## 17. Seed Data
 

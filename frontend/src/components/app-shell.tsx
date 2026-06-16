@@ -25,7 +25,6 @@ const navItems: NavItem[] = [
   { href: "/library", label: "文献库", icon: BookMarked },
   { href: "/feedback", label: "反馈", icon: History },
   { href: "/search", label: "搜索", icon: Search },
-  { href: "/fetch-runs/1", label: "Fetch 详情", icon: Radar },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
