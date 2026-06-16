@@ -72,11 +72,17 @@ async function startApplication() {
 
     const frontend = startService({
       name: "frontend",
-      command: runtime.npm,
-      args: ["run", "start", "--", "-p", String(FRONTEND_PORT)],
+      command: runtime.node,
+      args: [
+        path.join(repoRoot, "frontend", "node_modules", "next", "dist", "bin", "next"),
+        "start",
+        "-p",
+        String(FRONTEND_PORT),
+      ],
       cwd: path.join(repoRoot, "frontend"),
       env: {
         ...serviceEnv,
+        NODE_ENV: "production",
         NEXT_PUBLIC_API_BASE_URL: `http://localhost:${BACKEND_PORT}/api`,
         NEXT_TELEMETRY_DISABLED: "1",
       },
@@ -172,15 +178,15 @@ function walkUpForRepoRoot(startPath) {
 async function findRuntime() {
   const envDir = await findCondaEnvDir();
   const python = path.join(envDir, "python.exe");
-  const npm = path.join(envDir, "npm.cmd");
+  const node = path.join(envDir, "node.exe");
 
-  if (!fs.existsSync(python) || !fs.existsSync(npm)) {
+  if (!fs.existsSync(python) || !fs.existsSync(node)) {
     throw new Error(
-      `Conda environment '${CONDA_ENV_NAME}' is missing python.exe or npm.cmd at ${envDir}.`,
+      `Conda environment '${CONDA_ENV_NAME}' is missing python.exe or node.exe at ${envDir}.`,
     );
   }
 
-  return { envDir, python, npm };
+  return { envDir, python, node };
 }
 
 async function findCondaEnvDir() {
@@ -247,7 +253,7 @@ function pushIfPresent(list, value) {
 function isValidCondaEnv(envDir) {
   return (
     fs.existsSync(path.join(envDir, "python.exe")) &&
-    fs.existsSync(path.join(envDir, "npm.cmd"))
+    fs.existsSync(path.join(envDir, "node.exe"))
   );
 }
 
