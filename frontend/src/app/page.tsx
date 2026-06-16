@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RotateCw } from "lucide-react";
+import { Play, RotateCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -29,6 +29,8 @@ export default function Home() {
   const [activeFilter, setActiveFilter] = useState(filters[0]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
+  const [isClearingRuns, setIsClearingRuns] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadLatest = useCallback(async () => {
@@ -47,6 +49,7 @@ export default function Home() {
   const startFetch = async () => {
     setIsFetching(true);
     setError(null);
+    setMessage(null);
     try {
       await apiSend("/fetch/manual", "POST", {
         mode: "since_last_success",
@@ -61,6 +64,32 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Fetch failed");
     } finally {
       setIsFetching(false);
+    }
+  };
+
+  const clearFetchRuns = async () => {
+    const confirmed = window.confirm(
+      "确认清空所有检索记录？已入库论文、文献库、反馈、数据源和关键词组都会保留。",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingRuns(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await apiSend<Record<string, number>>("/fetch/runs/clear", "POST");
+      await loadLatest();
+      setMessage(
+        `检索记录已清空：${result.deleted_runs ?? 0} 次运行，${
+          result.deleted_run_items ?? 0
+        } 条运行项，${result.deleted_cursors ?? 0} 个 cursor。`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "清空检索记录失败");
+    } finally {
+      setIsClearingRuns(false);
     }
   };
 
@@ -112,6 +141,12 @@ export default function Home() {
         </div>
       ) : null}
 
+      {message ? (
+        <div className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {message}
+        </div>
+      ) : null}
+
       <section className="mb-6 border-b border-zinc-200 pb-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -142,6 +177,14 @@ export default function Home() {
           >
             <RotateCw size={15} aria-hidden="true" />
             刷新状态
+          </button>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+            onClick={clearFetchRuns}
+            disabled={isFetching || isClearingRuns}
+          >
+            <Trash2 size={15} aria-hidden="true" />
+            {isClearingRuns ? "正在清空..." : "清空检索记录"}
           </button>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
