@@ -8,7 +8,9 @@
   "scripts": {
     "start": "electron .",
     "build:frontend": "npm --prefix ../frontend run build",
-    "build": "npm run build:frontend && electron-builder --win --dir"
+    "build": "npm run build:win",
+    "build:win": "npm run build:frontend && electron-builder --win --dir",
+    "build:mac": "npm run build:frontend && electron-builder --mac --dir"
   },
   "build": {
     "appId": "com.paperradar.desktop",
@@ -24,6 +26,13 @@
     "asar": true,
     "win": {
       "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": [
+        "dir"
+      ]
     }
   },
   "devDependencies": {

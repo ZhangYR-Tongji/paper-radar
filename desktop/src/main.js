@@ -49,6 +49,20 @@ async function startApplication() {
 
     const runtime = await findRuntime();
     const serviceEnv = createServiceEnv(runtime.envDir);
+    const nextCli = path.join(
+      repoRoot,
+      "frontend",
+      "node_modules",
+      "next",
+      "dist",
+      "bin",
+      "next",
+    );
+    if (!fs.existsSync(nextCli)) {
+      throw new Error(
+        "Next.js CLI was not found. Run npm install in the frontend directory.",
+      );
+    }
 
     const backend = startService({
       name: "backend",
@@ -73,12 +87,7 @@ async function startApplication() {
     const frontend = startService({
       name: "frontend",
       command: runtime.node,
-      args: [
-        path.join(repoRoot, "frontend", "node_modules", "next", "dist", "bin", "next"),
-        "start",
-        "-p",
-        String(FRONTEND_PORT),
-      ],
+      args: [nextCli, "start", "-p", String(FRONTEND_PORT)],
       cwd: path.join(repoRoot, "frontend"),
       env: {
         ...serviceEnv,
@@ -177,8 +186,8 @@ function walkUpForRepoRoot(startPath) {
 
 async function findRuntime() {
   const envDir = await findCondaEnvDir();
-  const python = path.join(envDir, "python.exe");
-  const node = path.join(envDir, "node.exe");
+  const python = path.join(envDir, executableDirName(), executableName("python"));
+  const node = path.join(envDir, executableDirName(), executableName("node"));
 
   if (!fs.existsSync(python) || !fs.existsSync(node)) {
     throw new Error(
@@ -224,20 +233,7 @@ function runtimeEnvCandidates() {
     pushIfPresent(candidates, path.join(condaRoot, "envs", CONDA_ENV_NAME));
   }
 
-  for (const root of [
-    "D:\\miniconda",
-    "D:\\Miniconda3",
-    "D:\\anaconda3",
-    "D:\\Anaconda3",
-    path.join(home, "miniconda3"),
-    path.join(home, "Miniconda3"),
-    path.join(home, "anaconda3"),
-    path.join(home, "Anaconda3"),
-    "C:\\ProgramData\\miniconda3",
-    "C:\\ProgramData\\Miniconda3",
-    "C:\\ProgramData\\anaconda3",
-    "C:\\ProgramData\\Anaconda3",
-  ]) {
+  for (const root of condaRootCandidates(home)) {
     pushIfPresent(candidates, path.join(root, "envs", CONDA_ENV_NAME));
   }
 
@@ -252,18 +248,16 @@ function pushIfPresent(list, value) {
 
 function isValidCondaEnv(envDir) {
   return (
-    fs.existsSync(path.join(envDir, "python.exe")) &&
-    fs.existsSync(path.join(envDir, "node.exe"))
+    fs.existsSync(path.join(envDir, executableDirName(), executableName("python"))) &&
+    fs.existsSync(path.join(envDir, executableDirName(), executableName("node")))
   );
 }
 
 function findCondaCommand() {
+  const home = os.homedir();
   const candidates = [
     process.env.CONDA_EXE,
-    "D:\\miniconda\\Scripts\\conda.exe",
-    "D:\\miniconda\\condabin\\conda.bat",
-    "D:\\Miniconda3\\Scripts\\conda.exe",
-    "D:\\Miniconda3\\condabin\\conda.bat",
+    ...condaCommandCandidates(home),
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -272,7 +266,8 @@ function findCondaCommand() {
     }
   }
 
-  const whereResult = spawnSync("where", ["conda"], {
+  const locator = process.platform === "win32" ? "where" : "which";
+  const whereResult = spawnSync(locator, ["conda"], {
     encoding: "utf8",
     windowsHide: true,
   });
@@ -283,6 +278,68 @@ function findCondaCommand() {
     }
   }
   return null;
+}
+
+function condaRootCandidates(home) {
+  if (process.platform === "win32") {
+    return [
+      "D:\\miniconda",
+      "D:\\Miniconda3",
+      "D:\\anaconda3",
+      "D:\\Anaconda3",
+      path.join(home, "miniconda3"),
+      path.join(home, "Miniconda3"),
+      path.join(home, "anaconda3"),
+      path.join(home, "Anaconda3"),
+      "C:\\ProgramData\\miniconda3",
+      "C:\\ProgramData\\Miniconda3",
+      "C:\\ProgramData\\anaconda3",
+      "C:\\ProgramData\\Anaconda3",
+    ];
+  }
+
+  return [
+    "/opt/miniconda3",
+    "/opt/Miniconda3",
+    "/opt/anaconda3",
+    "/opt/Anaconda3",
+    "/opt/miniforge3",
+    "/opt/Miniforge3",
+    "/usr/local/miniconda3",
+    "/usr/local/anaconda3",
+    "/usr/local/miniforge3",
+    "/opt/homebrew/Caskroom/miniconda/base",
+    "/opt/homebrew/Caskroom/miniforge/base",
+    "/opt/homebrew/anaconda3",
+    path.join(home, "miniconda3"),
+    path.join(home, "Miniconda3"),
+    path.join(home, "anaconda3"),
+    path.join(home, "Anaconda3"),
+    path.join(home, "miniforge3"),
+    path.join(home, "Miniforge3"),
+  ];
+}
+
+function condaCommandCandidates(home) {
+  if (process.platform === "win32") {
+    return [
+      "D:\\miniconda\\Scripts\\conda.exe",
+      "D:\\miniconda\\condabin\\conda.bat",
+      "D:\\Miniconda3\\Scripts\\conda.exe",
+      "D:\\Miniconda3\\condabin\\conda.bat",
+    ];
+  }
+
+  return [
+    "/opt/homebrew/bin/conda",
+    "/usr/local/bin/conda",
+    "/opt/miniconda3/bin/conda",
+    "/opt/anaconda3/bin/conda",
+    "/opt/miniforge3/bin/conda",
+    path.join(home, "miniconda3", "bin", "conda"),
+    path.join(home, "anaconda3", "bin", "conda"),
+    path.join(home, "miniforge3", "bin", "conda"),
+  ];
 }
 
 function readEnvDirFromConda(condaCommand) {
@@ -321,12 +378,15 @@ function readEnvDirFromConda(condaCommand) {
 }
 
 function createServiceEnv(envDir) {
-  const entries = [
-    envDir,
-    path.join(envDir, "Scripts"),
-    path.join(envDir, "Library", "bin"),
-    process.env.PATH || "",
-  ];
+  const entries =
+    process.platform === "win32"
+      ? [
+          envDir,
+          path.join(envDir, "Scripts"),
+          path.join(envDir, "Library", "bin"),
+          process.env.PATH || "",
+        ]
+      : [path.join(envDir, "bin"), process.env.PATH || ""];
   return {
     ...process.env,
     CONDA_DEFAULT_ENV: CONDA_ENV_NAME,
@@ -374,6 +434,7 @@ function startService({ name, command, args, cwd, env, logPath }) {
   const child = spawn(command, args, {
     cwd,
     env,
+    detached: process.platform !== "win32",
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -457,9 +518,21 @@ function stopServices() {
         stdio: "ignore",
       });
     } else {
-      service.child.kill("SIGTERM");
+      try {
+        process.kill(-service.child.pid, "SIGTERM");
+      } catch {
+        service.child.kill("SIGTERM");
+      }
     }
   }
+}
+
+function executableDirName() {
+  return process.platform === "win32" ? "" : "bin";
+}
+
+function executableName(baseName) {
+  return process.platform === "win32" ? `${baseName}.exe` : baseName;
 }
 
 function formatStartupError(error) {

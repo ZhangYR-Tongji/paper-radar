@@ -130,3 +130,32 @@ desktop\dist\win-unpacked\Paper Radar.exe
 ```powershell
 npm start
 ```
+
+### macOS 桌面端
+
+macOS 版本使用同一套 Electron 桌面壳，但需要在 macOS 机器上构建：
+
+```bash
+cd "/path/to/paper ladar/desktop"
+npm install
+npm run build:mac
+```
+
+构建完成后打开：
+
+```text
+desktop/dist/mac*/Paper Radar.app
+```
+
+macOS 桌面端同样会隐藏启动后端 `127.0.0.1:8000` 和前端 `localhost:3000`，关闭窗口时会停止前后端后台进程。它会自动查找 `paper-radar` Conda 环境，支持常见的 Miniconda、Anaconda 和 Miniforge 安装位置；如果环境不在常规位置，可先设置：
+
+```bash
+export PAPER_RADAR_CONDA_ENV_DIR="/absolute/path/to/envs/paper-radar"
+```
+
+如果端口已被占用，应用会弹出错误提示。运行日志仍写入：
+
+```text
+.runtime/logs/backend.log
+.runtime/logs/frontend.log
+```
