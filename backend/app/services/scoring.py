@@ -61,7 +61,15 @@ def score_paper(db: Session, paper: Paper) -> PaperFeature:
     method_score = min(100.0, len(method_tags) * 25.0)
     venue_score = _venue_score(paper)
     freshness_score = _freshness_score(paper.published_date)
-    user_preference_score = _user_preference_score(paper, matched_positive, preferences)
+    user_preference_score = _user_preference_score(
+        paper,
+        text,
+        matched_groups,
+        matched_positive,
+        matched_negative,
+        method_tags,
+        preferences,
+    )
     negative_filter_penalty = min(100.0, (negative_hits + len(matched_negative)) * 25.0)
 
     final_score = (
@@ -145,16 +153,33 @@ def _freshness_score(published_date: date | None) -> float:
 
 def _user_preference_score(
     paper: Paper,
+    text: str,
+    matched_groups: list[str],
     matched_keywords: list[str],
+    matched_negative_keywords: list[str],
+    method_tags: list[str],
     preferences: UserPreferences | None,
 ) -> float:
     if not preferences:
         return 50.0
     keyword_weights = preferences.keyword_weights or {}
     venue_weights = preferences.venue_weights or {}
+    method_weights = preferences.method_weights or {}
+    topic_weights = preferences.topic_weights or {}
+    negative_keyword_weights = preferences.negative_keyword_weights or {}
     score = 50.0
     for keyword in matched_keywords:
         score += float(keyword_weights.get(keyword, 0.0)) * 5
+    for group in matched_groups:
+        score += float(topic_weights.get(group, 0.0)) * 4
+    for method in method_tags:
+        score += float(method_weights.get(method, 0.0)) * 4
     if paper.venue:
         score += float(venue_weights.get(paper.venue, 0.0)) * 5
+    negative_matches = set(matched_negative_keywords)
+    negative_matches.update(
+        keyword for keyword in negative_keyword_weights if _contains(text, keyword)
+    )
+    for keyword in negative_matches:
+        score -= float(negative_keyword_weights.get(keyword, 0.0)) * 5
     return max(0.0, min(100.0, score))

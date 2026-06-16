@@ -9,6 +9,7 @@ from app.models.paper import Paper, PaperFeature
 from app.schemas.feedback import FeedbackUpsert
 from app.services.paper_views import latest_recommendations, list_paper_dicts, paper_to_dict
 from app.services.preferences import update_user_preferences_after_feedback
+from app.services.scoring import score_paper
 
 router = APIRouter()
 
@@ -96,12 +97,21 @@ def _upsert_feedback(db: Session, paper_id: int, payload: FeedbackUpsert) -> dic
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
 
     feedback = db.query(UserFeedback).filter(UserFeedback.paper_id == paper_id).first()
+    previous_rating = feedback.rating if feedback else None
     if not feedback:
         feedback = UserFeedback(paper_id=paper_id)
         db.add(feedback)
     for field, value in payload.model_dump().items():
         setattr(feedback, field, value)
-    update_user_preferences_after_feedback(db, paper_id, payload)
+    preferences_changed = update_user_preferences_after_feedback(
+        db,
+        paper_id,
+        payload,
+        previous_rating=previous_rating,
+    )
+    if preferences_changed:
+        for candidate in db.query(Paper).all():
+            score_paper(db, candidate)
     db.commit()
     db.refresh(feedback)
     feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper_id).first()
