@@ -20,6 +20,25 @@ ENVIRONMENT_SETUP.md
 conda activate paper-radar
 ```
 
+## 一键启动
+
+Windows 下可直接双击项目根目录的 `start.bat`，或在 PowerShell 中执行：
+
+```powershell
+cd "C:\Users\10519\Desktop\paper ladar"
+.\start.ps1
+```
+
+启动脚本会自动检查 `paper-radar` Conda 环境、在缺少 `frontend/node_modules` 时安装前端依赖、初始化本地 SQLite 数据库，并分别打开后端与前端开发服务窗口。默认地址：
+
+```text
+Frontend: http://localhost:3000
+Backend:  http://127.0.0.1:8000
+Health:   http://127.0.0.1:8000/api/health
+```
+
+关闭项目时，关闭启动脚本打开的后端和前端 PowerShell 窗口即可。
+
 如需从零复现环境，参考 `ENVIRONMENT_SETUP.md`。
 
 ## 启动后端
