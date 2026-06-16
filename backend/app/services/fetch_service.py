@@ -26,6 +26,9 @@ ADAPTERS = {
     "osf": OsfAdapter(),
 }
 
+BACKFILL_WINDOW_DAYS = 90
+CURSOR_ADVANCING_MODES = {"since_last_success", "custom_range"}
+
 
 def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
     settings = get_settings()
@@ -36,7 +39,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
             detail=f"Fetch run {running.id} is already running.",
         )
 
-    fetch_to = payload.date_to or datetime.now(UTC)
+    fetch_to = _ensure_utc(payload.date_to or datetime.now(UTC))
     sources_query = db.query(SourceConfig).filter(SourceConfig.is_enabled.is_(True))
     if payload.source_names:
         sources_query = sources_query.filter(SourceConfig.source_name.in_(payload.source_names))
@@ -58,7 +61,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
         )
 
     run = FetchRun(
-        trigger_type="manual",
+        trigger_type=payload.mode,
         status="running",
         started_at=datetime.now(UTC),
         requested_to=fetch_to,
@@ -83,96 +86,83 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
 
         per_group_limit = max(source.daily_limit, 1)
         for group in keyword_groups:
-            cursor = _get_or_create_cursor(db, source.source_name, group.id)
-            fetch_from = _compute_fetch_from(
+            cursor = (
+                _get_or_create_cursor(db, source.source_name, group.id)
+                if payload.mode in CURSOR_ADVANCING_MODES
+                else None
+            )
+            fetch_windows = _compute_fetch_windows(
                 payload=payload,
                 cursor=cursor,
                 fetch_to=fetch_to,
                 first_run_lookback_days=settings.first_run_lookback_days,
             )
-            fetch_from_values.append(fetch_from)
-            item = FetchRunItem(
-                fetch_run_id=run.id,
-                source_name=source.source_name,
-                keyword_group_id=group.id,
-                fetch_from=fetch_from,
-                fetch_to=fetch_to,
-                status="running",
-                started_at=datetime.now(UTC),
-            )
-            db.add(item)
-            db.commit()
-            db.refresh(item)
 
-            try:
-                query = build_query(group)
-                raw_results = adapter.search(
-                    query=query,
-                    limit=per_group_limit,
-                    date_from=fetch_from,
-                    date_to=fetch_to,
+            for fetch_from, window_fetch_to in fetch_windows:
+                fetch_from_values.append(fetch_from)
+                item = FetchRunItem(
+                    fetch_run_id=run.id,
+                    source_name=source.source_name,
+                    keyword_group_id=group.id,
+                    fetch_from=fetch_from,
+                    fetch_to=window_fetch_to,
+                    status="running",
+                    started_at=datetime.now(UTC),
                 )
-                filtered_results = [
-                    result
-                    for result in raw_results
-                    if _result_in_range(result, fetch_from, fetch_to)
-                ]
-
-                new_count = 0
-                duplicate_count = 0
-                scored_count = 0
-                highly_relevant_count = 0
-                low_priority_count = 0
-
-                for result in filtered_results:
-                    duplicate = find_duplicate_paper(db, result)
-                    if duplicate:
-                        duplicate_count += 1
-                        continue
-
-                    paper = _paper_from_result(result)
-                    db.add(paper)
-                    db.flush()
-                    feature = score_paper(db, paper)
-                    new_count += 1
-                    scored_count += 1
-                    if feature.classification == "Highly Relevant":
-                        highly_relevant_count += 1
-                    if feature.classification == "Low Priority":
-                        low_priority_count += 1
-
-                item.status = "success"
-                item.raw_result_count = len(raw_results)
-                item.new_paper_count = new_count
-                item.duplicate_count = duplicate_count
-                item.finished_at = datetime.now(UTC)
-
-                cursor.last_successful_until = fetch_to
-                cursor.last_run_id = run.id
-                cursor.last_status = "success"
-                cursor.last_error_message = None
-                source.last_success_at = datetime.now(UTC)
-                source.last_error_message = None
-
-                run.total_raw_results += len(raw_results)
-                run.total_new_papers += new_count
-                run.total_duplicate_papers += duplicate_count
-                run.total_scored_papers += scored_count
-                run.total_highly_relevant += highly_relevant_count
-                run.total_low_priority += low_priority_count
+                db.add(item)
                 db.commit()
-            except Exception as exc:  # noqa: BLE001
-                message = f"{source.source_name} × {group.name}: {exc}"
-                error_messages.append(message)
-                item.status = "failed"
-                item.error_message = str(exc)
-                item.finished_at = datetime.now(UTC)
-                cursor.last_status = "failed"
-                cursor.last_error_message = str(exc)
-                source.last_error_at = datetime.now(UTC)
-                source.last_error_message = str(exc)
-                run.error_count += 1
-                db.commit()
+                db.refresh(item)
+
+                try:
+                    query = build_query(group)
+                    raw_results = adapter.search(
+                        query=query,
+                        limit=per_group_limit,
+                        date_from=fetch_from,
+                        date_to=window_fetch_to,
+                    )
+                    filtered_results = [
+                        result
+                        for result in raw_results
+                        if _result_in_range(result, fetch_from, window_fetch_to)
+                    ]
+
+                    counts = _store_results(db, filtered_results)
+
+                    item.status = "success"
+                    item.raw_result_count = len(raw_results)
+                    item.new_paper_count = counts["new"]
+                    item.duplicate_count = counts["duplicate"]
+                    item.finished_at = datetime.now(UTC)
+
+                    if cursor:
+                        cursor.last_successful_until = fetch_to
+                        cursor.last_run_id = run.id
+                        cursor.last_status = "success"
+                        cursor.last_error_message = None
+                    source.last_success_at = datetime.now(UTC)
+                    source.last_error_message = None
+
+                    run.total_raw_results += len(raw_results)
+                    run.total_new_papers += counts["new"]
+                    run.total_duplicate_papers += counts["duplicate"]
+                    run.total_scored_papers += counts["scored"]
+                    run.total_highly_relevant += counts["highly_relevant"]
+                    run.total_low_priority += counts["low_priority"]
+                    db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    message = f"{source.source_name} × {group.name}: {exc}"
+                    error_messages.append(message)
+                    item.status = "failed"
+                    item.error_message = str(exc)
+                    item.finished_at = datetime.now(UTC)
+                    if cursor:
+                        cursor.last_status = "failed"
+                        cursor.last_error_message = str(exc)
+                    source.last_error_at = datetime.now(UTC)
+                    source.last_error_message = str(exc)
+                    run.error_count += 1
+                    db.commit()
 
     run.finished_at = datetime.now(UTC)
     run.requested_from = min(fetch_from_values) if fetch_from_values else None
@@ -229,22 +219,80 @@ def _get_or_create_cursor(db: Session, source_name: str, group_id: int) -> Fetch
     return cursor
 
 
-def _compute_fetch_from(
+def _compute_fetch_windows(
     payload: ManualFetchRequest,
-    cursor: FetchCursor,
+    cursor: FetchCursor | None,
     fetch_to: datetime,
     first_run_lookback_days: int,
-) -> datetime:
-    if payload.mode == "custom_range":
+) -> list[tuple[datetime, datetime]]:
+    if payload.mode in {"custom_range", "historical_backfill"}:
         if not payload.date_from:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="date_from is required for custom_range mode.",
+                detail="date_from is required for custom range modes.",
             )
-        return payload.date_from
-    if cursor.last_successful_until:
-        return cursor.last_successful_until - timedelta(days=payload.overlap_buffer_days)
-    return fetch_to - timedelta(days=first_run_lookback_days)
+        fetch_from = _ensure_utc(payload.date_from)
+        if fetch_from > fetch_to:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="date_from must be earlier than date_to.",
+            )
+        if payload.mode == "historical_backfill":
+            return _split_backfill_windows(fetch_from, fetch_to)
+        return [(fetch_from, fetch_to)]
+
+    if cursor and cursor.last_successful_until:
+        fetch_from = _ensure_utc(cursor.last_successful_until) - timedelta(
+            days=payload.overlap_buffer_days,
+        )
+    else:
+        fetch_from = fetch_to - timedelta(days=first_run_lookback_days)
+    return [(fetch_from, fetch_to)]
+
+
+def _split_backfill_windows(
+    fetch_from: datetime,
+    fetch_to: datetime,
+) -> list[tuple[datetime, datetime]]:
+    windows: list[tuple[datetime, datetime]] = []
+    current_from = fetch_from
+    while current_from <= fetch_to:
+        current_to = min(
+            current_from + timedelta(days=BACKFILL_WINDOW_DAYS) - timedelta(microseconds=1),
+            fetch_to,
+        )
+        windows.append((current_from, current_to))
+        current_from = current_to + timedelta(microseconds=1)
+    return windows
+
+
+def _store_results(db: Session, filtered_results: list[PaperResult]) -> dict[str, int]:
+    counts = {
+        "new": 0,
+        "duplicate": 0,
+        "scored": 0,
+        "highly_relevant": 0,
+        "low_priority": 0,
+    }
+
+    for result in filtered_results:
+        duplicate = find_duplicate_paper(db, result)
+        if duplicate:
+            counts["duplicate"] += 1
+            continue
+
+        paper = _paper_from_result(result)
+        db.add(paper)
+        db.flush()
+        feature = score_paper(db, paper)
+        counts["new"] += 1
+        counts["scored"] += 1
+        if feature.classification == "Highly Relevant":
+            counts["highly_relevant"] += 1
+        if feature.classification == "Low Priority":
+            counts["low_priority"] += 1
+
+    return counts
 
 
 def _paper_from_result(result: PaperResult) -> Paper:
@@ -275,3 +323,9 @@ def _result_in_range(result: PaperResult, date_from: datetime, date_to: datetime
     if not value:
         return True
     return date_from.date() <= value <= date_to.date()
+
+
+def _ensure_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

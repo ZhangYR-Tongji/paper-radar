@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.routes.fetch import clear_fetch_runs
 from app.db.session import Base
 from app.models import FetchCursor, FetchRun, FetchRunItem, KeywordGroup, Paper, SourceConfig
+from app.models.scoring import ScoringWeights
 from app.schemas.fetch import ManualFetchRequest
+from app.services import fetch_service
 from app.services.fetch_service import run_manual_fetch
+from app.sources.base import PaperResult
 
 
 @pytest.fixture()
@@ -47,6 +50,77 @@ def test_manual_fetch_requires_keyword_group(db_session: Session) -> None:
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "请先在设置中创建并启用至少一个关键词组。"
+
+
+def test_historical_backfill_splits_windows_without_advancing_cursor(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    group = KeywordGroup(
+        name="Aerial manipulation",
+        positive_keywords=["aerial manipulation"],
+        priority_weight=1.0,
+    )
+    source = SourceConfig(
+        source_name="arxiv",
+        display_name="arXiv",
+        description="Metadata search.",
+        is_enabled=True,
+        daily_limit=5,
+    )
+    db_session.add_all([group, source, ScoringWeights()])
+    db_session.flush()
+
+    original_cursor_until = datetime(2026, 1, 1, tzinfo=UTC)
+    cursor = FetchCursor(
+        source_name="arxiv",
+        keyword_group_id=group.id,
+        last_successful_until=original_cursor_until,
+        last_status="success",
+    )
+    db_session.add(cursor)
+    db_session.commit()
+
+    calls: list[tuple[datetime, datetime]] = []
+
+    class FakeAdapter:
+        def search(self, query: str, limit: int, date_from=None, date_to=None):
+            calls.append((date_from, date_to))
+            titles = [
+                "Aerial manipulation with suspended payloads",
+                "Contact-rich flying robot planning",
+                "Language guided aerial object placement",
+            ]
+            return [
+                PaperResult(
+                    title=titles[len(calls) - 1],
+                    abstract="aerial manipulation",
+                    authors=[],
+                    published_date=date_from.date(),
+                    source="arxiv",
+                    source_id=f"paper-{len(calls)}",
+                ),
+            ]
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", FakeAdapter())
+
+    run = run_manual_fetch(
+        db_session,
+        ManualFetchRequest(
+            mode="historical_backfill",
+            date_from=datetime(2024, 1, 1, tzinfo=UTC),
+            date_to=datetime(2024, 7, 15, tzinfo=UTC),
+        ),
+    )
+
+    db_session.refresh(cursor)
+    assert cursor.last_successful_until == original_cursor_until.replace(tzinfo=None)
+    assert run.trigger_type == "historical_backfill"
+    assert run.status == "success"
+    assert run.total_raw_results == 3
+    assert run.total_new_papers == 3
+    assert len(calls) == 3
+    assert db_session.query(FetchRunItem).count() == 3
 
 
 def test_clear_fetch_runs_deletes_fetch_records_only(db_session: Session) -> None:

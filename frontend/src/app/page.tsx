@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RotateCw, Trash2 } from "lucide-react";
+import { CalendarClock, Play, RotateCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -21,6 +21,32 @@ type LatestResponse = {
   papers: ApiPaper[];
 };
 
+const backfillPresets = [
+  { value: "1y", label: "最近 1 年", years: 1 },
+  { value: "3y", label: "最近 3 年", years: 3 },
+  { value: "5y", label: "最近 5 年", years: 5 },
+  { value: "custom", label: "自定义", years: null },
+] as const;
+
+type BackfillPreset = (typeof backfillPresets)[number]["value"];
+
+const dateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const yearsAgoInputValue = (years: number) => {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - years);
+  return dateInputValue(date);
+};
+
+const dateStartIso = (value: string) => new Date(`${value}T00:00:00`).toISOString();
+const dateEndIso = (value: string) =>
+  new Date(`${value}T23:59:59.999`).toISOString();
+
 const filters = ["最新运行", "近 7 天", "近 30 天", "全部未读"];
 
 export default function Home() {
@@ -29,7 +55,12 @@ export default function Home() {
   const [activeFilter, setActiveFilter] = useState(filters[0]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
+  const [isBackfilling, setIsBackfilling] = useState(false);
   const [isClearingRuns, setIsClearingRuns] = useState(false);
+  const [isBackfillOpen, setIsBackfillOpen] = useState(false);
+  const [backfillPreset, setBackfillPreset] = useState<BackfillPreset>("1y");
+  const [backfillFrom, setBackfillFrom] = useState(() => yearsAgoInputValue(1));
+  const [backfillTo, setBackfillTo] = useState(() => dateInputValue(new Date()));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +95,51 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Fetch failed");
     } finally {
       setIsFetching(false);
+    }
+  };
+
+  const changeBackfillPreset = (value: BackfillPreset) => {
+    setBackfillPreset(value);
+    const preset = backfillPresets.find((item) => item.value === value);
+    if (!preset?.years) {
+      return;
+    }
+    setBackfillFrom(yearsAgoInputValue(preset.years));
+    setBackfillTo(dateInputValue(new Date()));
+  };
+
+  const startHistoricalBackfill = async () => {
+    if (!backfillFrom || !backfillTo) {
+      setError("请选择历史回溯检索的起止日期");
+      return;
+    }
+    if (new Date(dateStartIso(backfillFrom)) > new Date(dateEndIso(backfillTo))) {
+      setError("历史回溯检索的开始日期不能晚于结束日期");
+      return;
+    }
+
+    setIsBackfilling(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const run = await apiSend<Record<string, unknown>>("/fetch/manual", "POST", {
+        mode: "historical_backfill",
+        source_names: [],
+        keyword_group_ids: [],
+        date_from: dateStartIso(backfillFrom),
+        date_to: dateEndIso(backfillTo),
+        overlap_buffer_days: 0,
+      });
+      await loadLatest();
+      setMessage(
+        `历史回溯检索完成：新增 ${Number(
+          run.total_new_papers ?? 0,
+        )} 篇，原始结果 ${Number(run.total_raw_results ?? 0)} 条。`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "历史回溯检索失败");
+    } finally {
+      setIsBackfilling(false);
     }
   };
 
@@ -124,14 +200,24 @@ export default function Home() {
         title="最新推荐"
         description="按当前数据源、关键词组、评分权重和历史反馈排序的新论文。"
         action={
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
-            onClick={startFetch}
-            disabled={isFetching}
-          >
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
+              onClick={() => setIsBackfillOpen((value) => !value)}
+              disabled={isFetching || isBackfilling}
+            >
+              <CalendarClock size={16} aria-hidden="true" />
+              历史回溯
+            </button>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+              onClick={startFetch}
+              disabled={isFetching || isBackfilling}
+            >
             <Play size={16} aria-hidden="true" />
             {isFetching ? "检索中..." : "开始检索新论文"}
-          </button>
+            </button>
+          </div>
         }
       />
 
@@ -145,6 +231,67 @@ export default function Home() {
         <div className="mb-5 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
           {message}
         </div>
+      ) : null}
+
+      {isBackfillOpen ? (
+        <section className="mb-6 rounded-md border border-zinc-200 bg-white p-4">
+          <div className="mb-4">
+            <h2 className="text-base font-semibold text-zinc-950">历史回溯检索</h2>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end">
+            <label className="grid gap-1 text-sm font-medium text-zinc-700">
+              时间范围
+              <select
+                className="h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-950"
+                value={backfillPreset}
+                onChange={(event) =>
+                  changeBackfillPreset(event.target.value as BackfillPreset)
+                }
+                disabled={isBackfilling}
+              >
+                {backfillPresets.map((preset) => (
+                  <option key={preset.value} value={preset.value}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-zinc-700">
+              开始日期
+              <input
+                className="h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-950"
+                type="date"
+                value={backfillFrom}
+                onChange={(event) => {
+                  setBackfillPreset("custom");
+                  setBackfillFrom(event.target.value);
+                }}
+                disabled={isBackfilling}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-zinc-700">
+              结束日期
+              <input
+                className="h-10 rounded-md border border-zinc-200 bg-white px-3 text-sm font-normal text-zinc-950"
+                type="date"
+                value={backfillTo}
+                onChange={(event) => {
+                  setBackfillPreset("custom");
+                  setBackfillTo(event.target.value);
+                }}
+                disabled={isBackfilling}
+              />
+            </label>
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+              onClick={startHistoricalBackfill}
+              disabled={isFetching || isBackfilling}
+            >
+              <CalendarClock size={16} aria-hidden="true" />
+              {isBackfilling ? "回溯中..." : "开始回溯"}
+            </button>
+          </div>
+        </section>
       ) : null}
 
       <section className="mb-6 border-b border-zinc-200 pb-6">
@@ -181,7 +328,7 @@ export default function Home() {
           <button
             className="inline-flex h-9 items-center gap-2 rounded-md border border-rose-200 bg-white px-3 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-zinc-400"
             onClick={clearFetchRuns}
-            disabled={isFetching || isClearingRuns}
+            disabled={isFetching || isBackfilling || isClearingRuns}
           >
             <Trash2 size={15} aria-hidden="true" />
             {isClearingRuns ? "正在清空..." : "清空检索记录"}
