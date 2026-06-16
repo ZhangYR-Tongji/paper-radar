@@ -7,7 +7,7 @@ import { PaperCard } from "@/components/paper-card";
 import { apiGet, apiSend, mapPaper, type ApiPaper } from "@/lib/api";
 import type { FeedbackPayload, Paper } from "@/lib/types";
 
-const filters = ["全部", "已保存", "核心", "已读", "未读"];
+const filters = ["全部", "文献库", "重点文献", "已读"];
 
 export default function LibraryPage() {
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -28,17 +28,14 @@ export default function LibraryPage() {
   };
 
   const visible = papers.filter((paper) => {
-    if (activeFilter === "已保存") {
+    if (activeFilter === "文献库") {
       return paper.isSaved;
     }
-    if (activeFilter === "核心") {
+    if (activeFilter === "重点文献") {
       return paper.isCore;
     }
     if (activeFilter === "已读") {
       return paper.isRead;
-    }
-    if (activeFilter === "未读") {
-      return !paper.isRead;
     }
     return true;
   });
@@ -47,7 +44,7 @@ export default function LibraryPage() {
     <>
       <PageHeader
         title="文献库"
-        description="保存、已读、核心和忽略状态会汇总到这里。"
+        description="入库文献、重点文献和已读记录会汇总到这里。"
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {filters.map((filter) => (
@@ -72,7 +69,7 @@ export default function LibraryPage() {
         </div>
       ) : (
         <div className="rounded-md border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
-          暂无文献库记录。可在最新推荐中保存、标记已读或设为核心。
+          暂无文献库记录。可在最新推荐中加入文献库、设为重点，或打开原文/PDF 形成已读记录。
         </div>
       )}
     </>

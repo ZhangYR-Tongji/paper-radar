@@ -2,7 +2,6 @@
 
 import {
   Bookmark,
-  CheckCircle2,
   ExternalLink,
   FileText,
   Star,
@@ -45,6 +44,12 @@ export function PaperCard({
     await onFeedback(paper.id, feedbackPayload(patch));
   };
 
+  const markAsRead = () => {
+    if (!paper.isRead) {
+      void submit({ is_read: true });
+    }
+  };
+
   return (
     <article className="rounded-md border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -61,6 +66,11 @@ export function PaperCard({
             <span className="text-sm text-zinc-500">
               {paper.source} · {paper.date ?? "未知日期"}
             </span>
+            {paper.isRead ? (
+              <span className="rounded-md bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600">
+                已读
+              </span>
+            ) : null}
           </div>
           <h2 className="text-lg font-semibold leading-7 text-zinc-950">
             {paper.title}
@@ -73,69 +83,80 @@ export function PaperCard({
             {paper.abstract}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 lg:w-44 lg:justify-end">
-          {[1, 2, 3, 4, 5].map((rating) => (
+        <div className="flex shrink-0 flex-col items-start gap-2 lg:w-[13rem] lg:items-end">
+          <div className="grid grid-cols-5 gap-2" aria-label="论文评分">
+            {[1, 2, 3, 4, 5].map((rating) => (
+              <button
+                key={rating}
+                className={`inline-flex size-8 items-center justify-center rounded-md border text-xs font-semibold ${
+                  paper.rating === rating
+                    ? "border-amber-300 bg-amber-100 text-amber-800"
+                    : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+                }`}
+                onClick={() => submit({ rating })}
+                title={`评分 ${rating}`}
+              >
+                {rating}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
             <button
-              key={rating}
-              className={`inline-flex size-8 items-center justify-center rounded-md border text-xs font-semibold ${
-                paper.rating === rating
-                  ? "border-amber-300 bg-amber-100 text-amber-800"
-                  : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"
+              className={`inline-flex size-9 items-center justify-center rounded-md border ${
+                paper.isSaved
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
               }`}
-              onClick={() => submit({ rating })}
-              title={`评分 ${rating}`}
+              onClick={() =>
+                submit(
+                  paper.isSaved
+                    ? { is_saved: false, is_core: false }
+                    : { is_saved: true },
+                )
+              }
+              title={paper.isSaved ? "移出文献库" : "加入文献库"}
             >
-              {rating}
+              <Bookmark
+                size={16}
+                aria-label={paper.isSaved ? "移出文献库" : "加入文献库"}
+              />
             </button>
-          ))}
-          <button
-            className={`inline-flex size-9 items-center justify-center rounded-md border ${
-              paper.isSaved
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-            }`}
-            onClick={() => submit({ is_saved: !paper.isSaved })}
-            title="保存"
-          >
-            <Bookmark size={16} aria-label="保存" />
-          </button>
-          <button
-            className={`inline-flex size-9 items-center justify-center rounded-md border ${
-              paper.isRead
-                ? "border-blue-200 bg-blue-50 text-blue-700"
-                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-            }`}
-            onClick={() => submit({ is_read: !paper.isRead })}
-            title="已读"
-          >
-            <CheckCircle2 size={16} aria-label="已读" />
-          </button>
-          <button
-            className={`inline-flex size-9 items-center justify-center rounded-md border ${
-              paper.isCore
-                ? "border-amber-200 bg-amber-50 text-amber-700"
-                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-            }`}
-            onClick={() => submit({ is_core: !paper.isCore })}
-            title="核心"
-          >
-            <Star size={16} aria-label="核心" />
-          </button>
-          <button
-            className={`inline-flex size-9 items-center justify-center rounded-md border ${
-              paper.isIgnored
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
-            }`}
-            onClick={() => submit({ is_ignored: !paper.isIgnored })}
-            title="忽略"
-          >
-            {paper.isIgnored ? (
-              <XCircle size={16} aria-label="取消忽略" />
-            ) : (
-              <StarOff size={16} aria-label="忽略" />
-            )}
-          </button>
+            <button
+              className={`inline-flex size-9 items-center justify-center rounded-md border ${
+                paper.isCore
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              onClick={() =>
+                submit(
+                  paper.isCore
+                    ? { is_core: false }
+                    : { is_core: true, is_saved: true },
+                )
+              }
+              title={paper.isCore ? "取消重点文献" : "设为重点文献"}
+            >
+              <Star
+                size={16}
+                aria-label={paper.isCore ? "取消重点文献" : "设为重点文献"}
+              />
+            </button>
+            <button
+              className={`inline-flex size-9 items-center justify-center rounded-md border ${
+                paper.isIgnored
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+              onClick={() => submit({ is_ignored: !paper.isIgnored })}
+              title={paper.isIgnored ? "取消忽略" : "忽略"}
+            >
+              {paper.isIgnored ? (
+                <XCircle size={16} aria-label="取消忽略" />
+              ) : (
+                <StarOff size={16} aria-label="忽略" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
@@ -170,6 +191,7 @@ export function PaperCard({
           className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
           target="_blank"
           rel="noreferrer"
+          onClick={paper.url ? markAsRead : undefined}
         >
           <ExternalLink size={15} aria-hidden="true" />
           原文
@@ -180,6 +202,7 @@ export function PaperCard({
             className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
             target="_blank"
             rel="noreferrer"
+            onClick={markAsRead}
           >
             <FileText size={15} aria-hidden="true" />
             PDF
