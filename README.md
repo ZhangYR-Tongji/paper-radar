@@ -99,3 +99,34 @@ git add <changed-files>
 git commit -m "描述本次改动"
 git push
 ```
+
+## 桌面端一键启动
+
+第一版桌面端是 Windows 本机桌面壳，仍依赖当前项目目录和 `paper-radar` Conda 环境。首次构建：
+
+```powershell
+cd "C:\Users\10519\Desktop\paper ladar\desktop"
+npm install
+npm run build
+```
+
+构建完成后，双击：
+
+```text
+desktop\dist\win-unpacked\Paper Radar.exe
+```
+
+桌面应用会隐藏启动后端 `127.0.0.1:8000` 和前端 `localhost:3000`，不会弹出 PowerShell/CMD 窗口。关闭桌面窗口时，前端和后端后台进程会一起停止。
+
+如果 `3000` 或 `8000` 端口已被占用，桌面应用会弹出错误提示，请先关闭已有服务后再启动。运行日志写入：
+
+```text
+.runtime\logs\backend.log
+.runtime\logs\frontend.log
+```
+
+调试桌面壳时可在 `desktop` 目录执行：
+
+```powershell
+npm start
+```

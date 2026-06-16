@@ -1,0 +1,33 @@
+{
+  "name": "paper-radar-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop shell for Paper Radar",
+  "author": "Paper Radar",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:frontend": "npm --prefix ../frontend run build",
+    "build": "npm run build:frontend && electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.paperradar.desktop",
+    "productName": "Paper Radar",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/icon.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3"
+  }
+}
