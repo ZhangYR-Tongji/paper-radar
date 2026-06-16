@@ -1,8 +1,8 @@
 # CODEX_INSTRUCTIONS.md
 
-## Project: Design-AI Paper Radar
+## Project: Paper Radar
 
-Build a local-first web app for finding and ranking new academic papers related to AI-assisted design research.
+Build a local-first web app for finding and ranking new academic papers across research fields.
 
 No LLM in this phase. Do not use OpenAI API, local LLMs, LangChain, automatic summarization, or PDF full-text analysis.
 
@@ -133,17 +133,6 @@ created_at
 updated_at
 ```
 
-Default groups:
-
-```text
-AI-assisted conceptual design
-Design cognition and reasoning
-FBS / IBIS / Design Rationale
-Node-based and graph-based design tools
-Creativity support and Human-AI collaboration
-User study and evaluation methods
-```
-
 User must be able to:
 
 ```text
@@ -156,7 +145,7 @@ edit negative keywords
 edit required keywords
 edit optional keywords
 set priority weight
-reset defaults
+clear local keyword groups
 ```
 
 Keyword editing can use textarea, one keyword per line.
@@ -513,27 +502,26 @@ Positive:
 ```text
 theory useful
 method useful
-tool form useful
-design task useful
 metrics useful
 related work useful
 writing structure useful
-FBS / IBIS related
-design cognition related
-node-based AI related
-Human-AI collaboration related
+dataset useful
+benchmark useful
+review useful
+implementation useful
+domain background useful
 ```
 
 Negative:
 
 ```text
+out of scope
+too application-specific
+too theoretical
 too engineering
+too clinical
 too algorithmic
-too image-generation focused
-not conceptual design
-no user study
-no design cognition
-not FBS / IBIS related
+no empirical evidence
 weak method
 abstract not relevant
 duplicate recommendation
@@ -574,7 +562,7 @@ GET    /api/settings/keyword-groups
 POST   /api/settings/keyword-groups
 PUT    /api/settings/keyword-groups/{id}
 DELETE /api/settings/keyword-groups/{id}
-POST   /api/settings/keyword-groups/reset-defaults
+POST   /api/settings/keyword-groups/clear
 
 GET    /api/settings/scoring-weights
 PUT    /api/settings/scoring-weights
@@ -629,9 +617,8 @@ matched keyword groups
 matched keywords
 negative keyword hits
 rating control
-save button
-read button
-core button
+library button
+core paper button
 original link
 PDF link
 ```
@@ -677,7 +664,6 @@ On initialization, seed:
 
 ```text
 source_configs
-keyword_groups
 scoring_weights
 empty user_preferences
 ```
@@ -697,16 +683,7 @@ Default disabled source:
 OSF Preprints
 ```
 
-Default keyword groups:
-
-```text
-AI-assisted conceptual design
-Design cognition and reasoning
-FBS / IBIS / Design Rationale
-Node-based and graph-based design tools
-Creativity support and Human-AI collaboration
-User study and evaluation methods
-```
+Do not seed keyword groups. Users define keyword groups in Settings, and the local database reloads them on the next start.
 
 ## 18. Development Order
 
@@ -715,7 +692,7 @@ Follow this order:
 ```text
 1. Project scaffold
 2. Database models + migrations
-3. Seed default sources / keywords / scoring weights
+3. Seed default sources / scoring weights
 4. Settings APIs
 5. Settings frontend
 6. Source adapter interface
@@ -749,7 +726,7 @@ System deduplicates repeated papers
 System scores and classifies papers
 Latest page shows newest recommendations sorted by score
 User can rate papers 1-5
-User can save, mark read, mark core, ignore
+User can add papers to library, mark core papers, auto-mark read when opening original/PDF, ignore
 Feedback updates user preferences
 Library page shows saved/core/read papers
 Fetch run page shows success/failure details

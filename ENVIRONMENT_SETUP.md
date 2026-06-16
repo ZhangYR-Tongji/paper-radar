@@ -3,7 +3,7 @@
 本项目使用 Conda 管理本地开发环境，当前已创建环境：
 
 ```powershell
-conda activate design-ai-paper-radar
+conda activate paper-radar
 ```
 
 ## 已配置内容
@@ -23,14 +23,14 @@ MVP 阶段建议先用 SQLite 开发；后续需要生产一致性时再安装 P
 
 ```powershell
 conda env create -f environment.yml
-conda activate design-ai-paper-radar
+conda activate paper-radar
 ```
 
 如环境已存在，需要更新依赖：
 
 ```powershell
-conda env update -n design-ai-paper-radar -f environment.yml --prune
-conda activate design-ai-paper-radar
+conda env update -n paper-radar -f environment.yml --prune
+conda activate paper-radar
 ```
 
 ## 验证环境

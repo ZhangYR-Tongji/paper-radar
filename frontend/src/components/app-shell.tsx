@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </span>
             <span>
               <span className="block text-base font-semibold">
-                Design-AI Paper Radar
+                Paper Radar
               </span>
               <span className="block text-sm text-zinc-500">
                 本地优先论文检索与排序

@@ -33,11 +33,11 @@ class KeywordGroupBase(BaseModel):
     description: str = ""
     is_enabled: bool = True
     priority_weight: float = Field(default=1.0, ge=0)
-    positive_keywords: list[str] = []
-    negative_keywords: list[str] = []
-    required_keywords: list[str] = []
-    optional_keywords: list[str] = []
-    related_tags: list[str] = []
+    positive_keywords: list[str] = Field(default_factory=list)
+    negative_keywords: list[str] = Field(default_factory=list)
+    required_keywords: list[str] = Field(default_factory=list)
+    optional_keywords: list[str] = Field(default_factory=list)
+    related_tags: list[str] = Field(default_factory=list)
 
 
 class KeywordGroupCreate(KeywordGroupBase):

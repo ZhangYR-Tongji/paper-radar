@@ -1,1 +1,1 @@
-"""Design-AI Paper Radar backend package."""
+"""Paper Radar backend package."""

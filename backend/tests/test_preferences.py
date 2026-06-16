@@ -54,7 +54,7 @@ def test_intermediate_ratings_update_preferences(
     preferences = db_session.query(UserPreferences).one()
     assert changed is True
     assert preferences.keyword_weights["human-AI"] == pytest.approx(keyword_weight)
-    assert preferences.topic_weights["AI-assisted conceptual design"] == pytest.approx(
+    assert preferences.topic_weights["Human-AI collaboration"] == pytest.approx(
         context_weight,
     )
     assert preferences.method_weights["evaluation"] == pytest.approx(context_weight)
@@ -95,7 +95,7 @@ def test_same_rating_does_not_accumulate_preferences(db_session: Session) -> Non
     assert repeated is False
     assert upgraded is True
     assert preferences.keyword_weights["human-AI"] == pytest.approx(0.2)
-    assert preferences.topic_weights["AI-assisted conceptual design"] == pytest.approx(0.1)
+    assert preferences.topic_weights["Human-AI collaboration"] == pytest.approx(0.1)
     assert preferences.method_weights["evaluation"] == pytest.approx(0.1)
     assert preferences.venue_weights["CHI"] == pytest.approx(0.1)
 
@@ -128,8 +128,8 @@ def test_user_preferences_affect_scoring(db_session: Session) -> None:
         ),
     )
     preferred_paper = Paper(
-        title="Human-AI evaluation for conceptual design",
-        normalized_title="human ai evaluation for conceptual design",
+        title="Human-AI evaluation for scientific writing",
+        normalized_title="human ai evaluation for scientific writing",
         abstract="An evaluation study.",
         authors=[],
         source="test",
@@ -156,9 +156,9 @@ def test_user_preferences_affect_scoring(db_session: Session) -> None:
 
 def _add_featured_paper(db: Session) -> Paper:
     paper = Paper(
-        title="Human-AI conceptual design evaluation",
-        normalized_title="human ai conceptual design evaluation",
-        abstract="A human-AI evaluation study for conceptual design.",
+        title="Human-AI scientific writing evaluation",
+        normalized_title="human ai scientific writing evaluation",
+        abstract="A human-AI evaluation study for scholarly work.",
         authors=["Ada Lovelace"],
         source="test",
         source_id="paper-1",
@@ -169,7 +169,7 @@ def _add_featured_paper(db: Session) -> Paper:
     db.add(
         PaperFeature(
             paper_id=paper.id,
-            matched_keyword_groups=["AI-assisted conceptual design"],
+            matched_keyword_groups=["Human-AI collaboration"],
             matched_positive_keywords=["human-AI"],
             matched_negative_keywords=["blockchain"],
             method_tags=["evaluation"],

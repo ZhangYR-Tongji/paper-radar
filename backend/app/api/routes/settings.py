@@ -15,7 +15,6 @@ from app.schemas.settings import (
     SourceConfigRead,
     SourceConfigUpdate,
 )
-from app.seed import DEFAULT_KEYWORD_GROUPS
 
 router = APIRouter()
 
@@ -88,12 +87,10 @@ def delete_keyword_group(group_id: int, db: Session = Depends(get_db)) -> None:
     db.commit()
 
 
-@router.post("/keyword-groups/reset-defaults", response_model=list[KeywordGroupRead])
-def reset_keyword_group_defaults(db: Session = Depends(get_db)) -> list[KeywordGroup]:
+@router.post("/keyword-groups/clear", response_model=list[KeywordGroupRead])
+def clear_keyword_groups(db: Session = Depends(get_db)) -> list[KeywordGroup]:
     db.query(FetchCursor).delete()
     db.query(KeywordGroup).delete()
-    for group_data in DEFAULT_KEYWORD_GROUPS:
-        db.add(KeywordGroup(**group_data))
     db.commit()
     return db.query(KeywordGroup).order_by(KeywordGroup.id).all()
 

@@ -1,11 +1,11 @@
 # Backend
 
-FastAPI backend for Design-AI Paper Radar.
+FastAPI backend for Paper Radar.
 
 ## Run locally
 
 ```powershell
-conda activate design-ai-paper-radar
+conda activate paper-radar
 cd backend
 python -m app.cli
 uvicorn app.main:app --reload --port 8000

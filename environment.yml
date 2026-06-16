@@ -1,4 +1,4 @@
-name: design-ai-paper-radar
+name: paper-radar
 channels:
   - conda-forge
 dependencies:

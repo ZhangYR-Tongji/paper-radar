@@ -10,7 +10,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "Design-AI Paper Radar"
+    app_name: str = "Paper Radar"
     api_prefix: str = "/api"
     database_url: str = "sqlite:///./paper_radar.db"
     frontend_origin: str = "http://localhost:3000"

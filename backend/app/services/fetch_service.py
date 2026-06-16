@@ -41,11 +41,21 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
     if payload.source_names:
         sources_query = sources_query.filter(SourceConfig.source_name.in_(payload.source_names))
     sources = sources_query.order_by(SourceConfig.id).all()
+    if not sources:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先在设置中启用至少一个数据源。",
+        )
 
     groups_query = db.query(KeywordGroup).filter(KeywordGroup.is_enabled.is_(True))
     if payload.keyword_group_ids:
         groups_query = groups_query.filter(KeywordGroup.id.in_(payload.keyword_group_ids))
     keyword_groups = groups_query.order_by(KeywordGroup.id).all()
+    if not keyword_groups:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先在设置中创建并启用至少一个关键词组。",
+        )
 
     run = FetchRun(
         trigger_type="manual",

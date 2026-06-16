@@ -112,8 +112,9 @@ def _method_tags(text: str) -> list[str]:
     tags = []
     rules = {
         "user study": ["user study", "participants", "interview", "survey"],
+        "systematic review": ["systematic review", "literature review", "meta-analysis"],
         "evaluation": ["evaluation", "benchmark", "experiment", "metrics"],
-        "design rationale": ["design rationale", "ibis", "fbs", "argumentation"],
+        "modeling": ["model", "simulation", "theoretical framework"],
         "graph-based": ["graph", "node-link", "network"],
         "human-ai collaboration": ["human-ai", "co-creation", "co-creative"],
     }
@@ -129,10 +130,7 @@ def _venue_score(paper: Paper) -> float:
     ).casefold()
     if not venue_text:
         return 40.0
-    high_signal = ["design studies", "chi", "cscw", "ijhcs", "research in engineering design"]
-    medium_signal = ["arxiv", "conference", "journal", "acm", "ieee"]
-    if any(item in venue_text for item in high_signal):
-        return 90.0
+    medium_signal = ["arxiv", "conference", "journal", "transactions", "proceedings"]
     if any(item in venue_text for item in medium_signal):
         return 65.0
     return 50.0

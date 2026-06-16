@@ -35,13 +35,29 @@ export async function apiSend<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
-    const message = await response.text();
+    const message = await parseErrorMessage(response);
     throw new Error(message || `API request failed: ${response.status}`);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return response.json() as Promise<T>;
+}
+
+async function parseErrorMessage(response: Response): Promise<string> {
+  const text = await response.text();
+  if (!text) {
+    return "";
+  }
+  try {
+    const data = JSON.parse(text) as { detail?: unknown };
+    if (typeof data.detail === "string") {
+      return data.detail;
+    }
+  } catch {
+    return text;
+  }
+  return text;
 }
 
 export type ApiPaper = Record<string, unknown>;

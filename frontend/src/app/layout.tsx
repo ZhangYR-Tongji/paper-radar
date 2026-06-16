@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Design-AI Paper Radar",
-  description: "Local-first paper search and ranking for AI-assisted design research.",
+  title: "Paper Radar",
+  description: "Local-first academic paper search and ranking.",
 };
 
 export default function RootLayout({

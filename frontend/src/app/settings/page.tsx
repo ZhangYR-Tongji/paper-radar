@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, RotateCcw, Save, Trash2 } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
@@ -77,7 +77,7 @@ export default function SettingsPage() {
 
   const createGroup = async () => {
     await apiSend("/settings/keyword-groups", "POST", {
-      name: `New keyword group ${Date.now()}`,
+      name: `新关键词组 ${Date.now()}`,
       description: "",
       is_enabled: true,
       priority_weight: 1,
@@ -95,9 +95,10 @@ export default function SettingsPage() {
     await loadSettings();
   };
 
-  const resetDefaults = async () => {
-    await apiSend("/settings/keyword-groups/reset-defaults", "POST");
+  const clearGroups = async () => {
+    await apiSend("/settings/keyword-groups/clear", "POST");
     await loadSettings();
+    setMessage("关键词组已清空");
   };
 
   const saveWeights = async () => {
@@ -109,24 +110,15 @@ export default function SettingsPage() {
     <>
       <PageHeader
         title="设置"
-        description="配置数据源、关键词组和评分权重。所有 Fetch 逻辑都会从这些配置读取。"
+        description="配置数据源、关键词组和评分权重。配置保存在本地数据库中。"
         action={
-          <div className="flex gap-2">
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-              onClick={resetDefaults}
-            >
-              <RotateCcw size={16} aria-hidden="true" />
-              重置默认
-            </button>
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
-              onClick={saveWeights}
-            >
-              <Save size={16} aria-hidden="true" />
-              保存权重
-            </button>
-          </div>
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
+            onClick={saveWeights}
+          >
+            <Save size={16} aria-hidden="true" />
+            保存权重
+          </button>
         }
       />
 
@@ -205,29 +197,46 @@ export default function SettingsPage() {
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-base font-semibold text-zinc-950">关键词组</h2>
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-            onClick={createGroup}
-          >
-            <Plus size={15} aria-hidden="true" />
-            新建
-          </button>
+          <div className="flex gap-2">
+            {groups.length ? (
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                onClick={clearGroups}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                清空
+              </button>
+            ) : null}
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={createGroup}
+            >
+              <Plus size={15} aria-hidden="true" />
+              新建
+            </button>
+          </div>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          {groups.map((group) => (
-            <KeywordGroupEditor
-              key={group.id}
-              group={group}
-              onChange={(next) =>
-                setGroups((current) =>
-                  current.map((item) => (item.id === next.id ? next : item)),
-                )
-              }
-              onSave={updateGroup}
-              onDelete={deleteGroup}
-            />
-          ))}
-        </div>
+        {groups.length ? (
+          <div className="grid gap-4 lg:grid-cols-3">
+            {groups.map((group) => (
+              <KeywordGroupEditor
+                key={group.id}
+                group={group}
+                onChange={(next) =>
+                  setGroups((current) =>
+                    current.map((item) => (item.id === next.id ? next : item)),
+                  )
+                }
+                onSave={updateGroup}
+                onDelete={deleteGroup}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
+            暂无关键词组。新建研究主题后即可检索。
+          </div>
+        )}
       </section>
 
       <section>
