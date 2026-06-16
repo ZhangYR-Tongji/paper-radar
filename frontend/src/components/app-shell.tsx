@@ -3,12 +3,12 @@
 import {
   BookMarked,
   History,
-  Radar,
   Search,
   Settings,
   Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
@@ -34,11 +34,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-stone-50 text-zinc-950">
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-md bg-emerald-700 text-white">
-              <Radar size={22} aria-hidden="true" />
-            </span>
-            <span>
+          <Link href="/" className="inline-flex items-center" aria-label="Paper Radar">
+            <Image
+              src="/paper-radar-logo.png"
+              alt="Paper Radar"
+              width={254}
+              height={86}
+              priority
+              className="h-12 w-auto object-contain sm:h-14"
+            />
+            <span className="sr-only">
               <span className="block text-base font-semibold">
                 Paper Radar
               </span>
