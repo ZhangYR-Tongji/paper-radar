@@ -55,6 +55,16 @@ uvicorn app.main:app --reload --port 8000
 curl http://localhost:8000/api/health
 ```
 
+## 常用 API
+
+清空所有检索运行记录：
+
+```powershell
+curl -X POST http://localhost:8000/api/fetch/runs/clear
+```
+
+该接口会删除 `fetch_runs`、`fetch_run_items` 和 `fetch_cursors`，并重置数据源的最近成功/错误状态；不会删除已入库论文、文献库、反馈、数据源配置或关键词组。如果当前有检索任务正在运行，接口会返回 `409`。
+
 ## 启动前端
 
 ```powershell

@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.fetch import FetchRun
+from app.models.fetch import FetchCursor, FetchRun, FetchRunItem
+from app.models.source_config import SourceConfig
 from app.schemas.fetch import FetchStatusRead, ManualFetchRequest
 from app.services.fetch_service import run_manual_fetch
 from app.services.paper_views import fetch_run_to_dict
@@ -35,6 +36,34 @@ def get_fetch_status(db: Session = Depends(get_db)) -> FetchStatusRead:
 def list_fetch_runs(db: Session = Depends(get_db)) -> list[dict[str, object]]:
     runs = db.query(FetchRun).order_by(FetchRun.started_at.desc(), FetchRun.id.desc()).all()
     return [fetch_run_to_dict(db, run) or {} for run in runs]
+
+
+@router.post("/runs/clear")
+def clear_fetch_runs(db: Session = Depends(get_db)) -> dict[str, int]:
+    running = db.query(FetchRun).filter(FetchRun.status == "running").first()
+    if running:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Fetch run {running.id} is still running.",
+        )
+
+    deleted_items = db.query(FetchRunItem).delete()
+    deleted_cursors = db.query(FetchCursor).delete()
+    deleted_runs = db.query(FetchRun).delete()
+    reset_sources = 0
+    for source in db.query(SourceConfig).all():
+        source.last_success_at = None
+        source.last_error_at = None
+        source.last_error_message = None
+        reset_sources += 1
+    db.commit()
+
+    return {
+        "deleted_runs": deleted_runs,
+        "deleted_run_items": deleted_items,
+        "deleted_cursors": deleted_cursors,
+        "reset_sources": reset_sources,
+    }
 
 
 @router.get("/runs/{run_id}")
