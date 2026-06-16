@@ -10,6 +10,8 @@ import type {
   SourceConfig,
 } from "./types";
 
+export type CitationExportFormat = "ris" | "bibtex";
+
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: { Accept: "application/json" },
@@ -167,4 +169,15 @@ export function mapFetchRun(item: Record<string, unknown> | null): FetchRun | nu
     items: ((item.items as Record<string, unknown>[]) ?? []).map(mapFetchRunItem),
     papers: ((item.papers as ApiPaper[]) ?? []).map(mapPaper),
   };
+}
+
+export function paperExportUrl(
+  paperId: number,
+  format: CitationExportFormat,
+): string {
+  return `${API_BASE_URL}/papers/${paperId}/export?format=${format}`;
+}
+
+export function libraryExportUrl(format: CitationExportFormat): string {
+  return `${API_BASE_URL}/papers/export/library?format=${format}`;
 }

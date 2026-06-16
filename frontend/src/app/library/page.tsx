@@ -1,10 +1,17 @@
 "use client";
 
+import { Download } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
 import { PaperCard } from "@/components/paper-card";
-import { apiGet, apiSend, mapPaper, type ApiPaper } from "@/lib/api";
+import {
+  apiGet,
+  apiSend,
+  libraryExportUrl,
+  mapPaper,
+  type ApiPaper,
+} from "@/lib/api";
 import type { FeedbackPayload, Paper } from "@/lib/types";
 
 const filters = ["全部", "文献库", "重点文献", "已读"];
@@ -45,6 +52,28 @@ export default function LibraryPage() {
       <PageHeader
         title="文献库"
         description="入库文献、重点文献和已读记录会汇总到这里。"
+        action={
+          papers.length ? (
+            <div className="flex flex-wrap gap-2">
+              <a
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                href={libraryExportUrl("ris")}
+                title="导出文献库 RIS，可导入 Zotero"
+              >
+                <Download size={16} aria-hidden="true" />
+                导出 RIS
+              </a>
+              <a
+                className="inline-flex h-10 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                href={libraryExportUrl("bibtex")}
+                title="导出文献库 BibTeX，可导入 Zotero"
+              >
+                <Download size={16} aria-hidden="true" />
+                导出 BibTeX
+              </a>
+            </div>
+          ) : null
+        }
       />
       <div className="mb-4 flex flex-wrap gap-2">
         {filters.map((filter) => (

@@ -56,6 +56,7 @@ http://localhost:3000
 - 已实现手动增量 fetch、source × keyword group cursor、去重、规则评分、分类和反馈偏好更新。
 - 已创建 Next.js 应用壳和 MVP 页面路由：`/`、`/settings`、`/library`、`/feedback`、`/search`、`/fetch-runs/[id]`。
 - 前端页面已接入真实后端 API，可配置来源/关键词/权重、手动抓取、查看推荐、反馈和文献库。
+- 已支持单篇和文献库批量导出 `RIS` / `BibTeX`，可导入 Zotero。
 - 发布版不预置任何领域关键词组；用户在设置页新建的关键词组会保存到本地 SQLite 数据库。
 - 本地开发默认使用 SQLite，后续可通过 `DATABASE_URL` 切换 PostgreSQL。
 

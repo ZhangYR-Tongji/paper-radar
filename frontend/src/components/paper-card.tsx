@@ -2,6 +2,7 @@
 
 import {
   Bookmark,
+  Download,
   ExternalLink,
   FileText,
   Star,
@@ -9,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { paperExportUrl } from "@/lib/api";
 import type { FeedbackPayload, Paper } from "@/lib/types";
 
 const classificationStyles: Record<Paper["classification"], string> = {
@@ -208,6 +210,22 @@ export function PaperCard({
             PDF
           </a>
         ) : null}
+        <a
+          href={paperExportUrl(paper.id, "ris")}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          title="导出 RIS，可导入 Zotero"
+        >
+          <Download size={15} aria-hidden="true" />
+          RIS
+        </a>
+        <a
+          href={paperExportUrl(paper.id, "bibtex")}
+          className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          title="导出 BibTeX，可导入 Zotero"
+        >
+          <Download size={15} aria-hidden="true" />
+          BibTeX
+        </a>
       </div>
     </article>
   );

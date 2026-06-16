@@ -744,7 +744,7 @@ LLM summary
 LLM recommendation reason
 PDF full-text analysis
 automatic literature review
-Zotero sync
+Zotero automatic sync beyond RIS / BibTeX export
 Notion sync
 WeChat push
 background-only cron

@@ -1,17 +1,21 @@
 from datetime import date
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.feedback import UserFeedback
 from app.models.paper import Paper, PaperFeature
 from app.schemas.feedback import FeedbackUpsert
+from app.services.citation_export import export_filename, export_media_type, export_papers
 from app.services.paper_views import latest_recommendations, list_paper_dicts, paper_to_dict
 from app.services.preferences import update_user_preferences_after_feedback
 from app.services.scoring import score_paper
 
 router = APIRouter()
+ExportFormat = Literal["ris", "bibtex"]
 
 
 @router.get("")
@@ -63,6 +67,19 @@ def library_papers(db: Session = Depends(get_db)) -> list[dict[str, object]]:
     return merged
 
 
+@router.get("/export/library")
+def export_library_papers(
+    export_format: ExportFormat = Query(default="ris", alias="format", pattern="^(ris|bibtex)$"),
+    db: Session = Depends(get_db),
+) -> Response:
+    papers = _library_paper_models(db)
+    return _export_response(
+        papers,
+        export_format,
+        base_filename="paper-radar-library",
+    )
+
+
 @router.get("/{paper_id}")
 def get_paper(paper_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
     paper = db.get(Paper, paper_id)
@@ -71,6 +88,22 @@ def get_paper(paper_id: int, db: Session = Depends(get_db)) -> dict[str, object]
     feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper_id).first()
     feedback = db.query(UserFeedback).filter(UserFeedback.paper_id == paper_id).first()
     return paper_to_dict(paper, feature, feedback)
+
+
+@router.get("/{paper_id}/export")
+def export_paper(
+    paper_id: int,
+    export_format: ExportFormat = Query(default="ris", alias="format", pattern="^(ris|bibtex)$"),
+    db: Session = Depends(get_db),
+) -> Response:
+    paper = db.get(Paper, paper_id)
+    if not paper:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+    return _export_response(
+        [paper],
+        export_format,
+        base_filename=f"paper-radar-paper-{paper.id}",
+    )
 
 
 @router.post("/{paper_id}/feedback")
@@ -116,3 +149,33 @@ def _upsert_feedback(db: Session, paper_id: int, payload: FeedbackUpsert) -> dic
     db.refresh(feedback)
     feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper_id).first()
     return paper_to_dict(paper, feature, feedback)
+
+
+def _library_paper_models(db: Session) -> list[Paper]:
+    return (
+        db.query(Paper)
+        .join(UserFeedback, UserFeedback.paper_id == Paper.id)
+        .filter(
+            or_(
+                UserFeedback.is_saved.is_(True),
+                UserFeedback.is_core.is_(True),
+                UserFeedback.is_read.is_(True),
+            ),
+        )
+        .order_by(Paper.created_at.desc(), Paper.id.desc())
+        .all()
+    )
+
+
+def _export_response(
+    papers: list[Paper],
+    export_format: ExportFormat,
+    base_filename: str,
+) -> Response:
+    content = export_papers(papers, export_format)
+    filename = export_filename(base_filename, export_format)
+    return Response(
+        content=content,
+        media_type=export_media_type(export_format),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
