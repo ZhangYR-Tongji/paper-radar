@@ -194,6 +194,18 @@ def test_latest_recommendations_use_minimum_score_preference(
     assert [paper["title"] for paper in custom_result["papers"]] == ["Above threshold"]
 
 
+def test_latest_recommendations_empty_without_fetch_run(db_session: Session) -> None:
+    started_at = datetime(2026, 6, 17, tzinfo=UTC)
+    _add_scored_paper(db_session, "Existing paper", 90.0, started_at)
+    db_session.commit()
+
+    result = latest_recommendations(db_session)
+
+    assert result["latest_fetch_run"] is None
+    assert result["recommendation_min_score"] == 50.0
+    assert result["papers"] == []
+
+
 def _add_featured_paper(db: Session) -> Paper:
     paper = Paper(
         title="Human-AI scientific writing evaluation",

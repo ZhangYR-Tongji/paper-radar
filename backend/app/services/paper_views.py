@@ -112,6 +112,13 @@ def list_paper_dicts(
 def latest_recommendations(db: Session) -> dict[str, object]:
     run = db.query(FetchRun).order_by(FetchRun.started_at.desc(), FetchRun.id.desc()).first()
     min_score = _recommendation_min_score(db)
+    if not run:
+        return {
+            "latest_fetch_run": None,
+            "recommendation_min_score": min_score,
+            "papers": [],
+        }
+
     papers = list_paper_dicts(
         db,
         min_score=min_score,
