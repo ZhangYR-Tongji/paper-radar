@@ -9,7 +9,8 @@
     "start": "electron .",
     "build:frontend": "npm --prefix ../frontend run build",
     "build": "npm run build:win",
-    "build:win": "npm run build:frontend && electron-builder --win --dir",
+    "build:win": "npm run build:frontend && electron-builder --win --dir && npm run shortcut:win",
+    "shortcut:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ../create-windows-shortcut.ps1",
     "build:mac": "npm run build:frontend && electron-builder --mac --dir"
   },
   "build": {

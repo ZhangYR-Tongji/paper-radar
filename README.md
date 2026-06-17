@@ -113,7 +113,13 @@ npm run build
 构建完成后，双击：
 
 ```text
-desktop\dist\win-unpacked\Paper Radar.exe
+Paper Radar.lnk
+```
+
+Windows 构建会在项目根目录自动生成 `Paper Radar.lnk`，它指向 `desktop\dist\win-unpacked\Paper Radar.exe`。如果移动了项目目录或需要手动重建快捷方式，可在项目根目录执行：
+
+```powershell
+.\create-windows-shortcut.ps1
 ```
 
 桌面应用会隐藏启动后端 `127.0.0.1:8000` 和前端 `localhost:3000`，不会弹出 PowerShell/CMD 窗口。关闭桌面窗口时，前端和后端后台进程会一起停止。

@@ -28,5 +28,6 @@ desktop/dist/
 # OS / editor
 .DS_Store
 Thumbs.db
+*.lnk
 .vscode/
 .idea/
