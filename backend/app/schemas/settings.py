@@ -84,3 +84,15 @@ class ScoringWeightsUpdate(BaseModel):
     freshness_weight: float | None = Field(default=None, ge=0)
     user_preference_weight: float | None = Field(default=None, ge=0)
     negative_filter_weight: float | None = Field(default=None, ge=0)
+
+
+class UserPreferencesRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    recommendation_min_score: float
+    updated_at: datetime
+
+
+class UserPreferencesUpdate(BaseModel):
+    recommendation_min_score: float | None = Field(default=None, ge=0, le=100)

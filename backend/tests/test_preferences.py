@@ -1,12 +1,22 @@
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.session import Base
-from app.models import KeywordGroup, Paper, PaperFeature, ScoringWeights, UserPreferences
+from app.models import (
+    FetchRun,
+    KeywordGroup,
+    Paper,
+    PaperFeature,
+    ScoringWeights,
+    UserFeedback,
+    UserPreferences,
+)
 from app.schemas.feedback import FeedbackUpsert
+from app.services.paper_views import latest_recommendations
 from app.services.preferences import update_user_preferences_after_feedback
 from app.services.scoring import score_paper
 
@@ -154,6 +164,36 @@ def test_user_preferences_affect_scoring(db_session: Session) -> None:
     assert preferred_feature.final_score > penalized_feature.final_score
 
 
+def test_latest_recommendations_use_minimum_score_preference(
+    db_session: Session,
+) -> None:
+    started_at = datetime(2026, 6, 17, tzinfo=UTC)
+    run = FetchRun(status="success", started_at=started_at)
+    db_session.add(run)
+    db_session.flush()
+
+    _add_scored_paper(db_session, "Below threshold", 49.0, started_at)
+    _add_scored_paper(db_session, "At threshold", 50.0, started_at)
+    _add_scored_paper(db_session, "Above threshold", 70.0, started_at)
+    ignored = _add_scored_paper(db_session, "Ignored high score", 90.0, started_at)
+    db_session.add(UserFeedback(paper_id=ignored.id, is_ignored=True))
+    db_session.commit()
+
+    default_result = latest_recommendations(db_session)
+    assert default_result["recommendation_min_score"] == 50.0
+    assert [paper["title"] for paper in default_result["papers"]] == [
+        "Above threshold",
+        "At threshold",
+    ]
+
+    db_session.add(UserPreferences(recommendation_min_score=60.0))
+    db_session.commit()
+
+    custom_result = latest_recommendations(db_session)
+    assert custom_result["recommendation_min_score"] == 60.0
+    assert [paper["title"] for paper in custom_result["papers"]] == ["Above threshold"]
+
+
 def _add_featured_paper(db: Session) -> Paper:
     paper = Paper(
         title="Human-AI scientific writing evaluation",
@@ -175,6 +215,34 @@ def _add_featured_paper(db: Session) -> Paper:
             method_tags=["evaluation"],
             final_score=50.0,
             classification="Worth Checking",
+        ),
+    )
+    db.flush()
+    return paper
+
+
+def _add_scored_paper(
+    db: Session,
+    title: str,
+    score: float,
+    started_at: datetime,
+) -> Paper:
+    paper = Paper(
+        title=title,
+        normalized_title=title.lower(),
+        abstract="",
+        authors=[],
+        source="test",
+        source_id=title,
+        created_at=started_at + timedelta(seconds=1),
+    )
+    db.add(paper)
+    db.flush()
+    db.add(
+        PaperFeature(
+            paper_id=paper.id,
+            final_score=score,
+            classification="Filtered" if score < 40 else "Worth Checking",
         ),
     )
     db.flush()

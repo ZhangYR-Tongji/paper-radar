@@ -18,6 +18,7 @@ import type { FeedbackPayload, FetchRun, Paper } from "@/lib/types";
 
 type LatestResponse = {
   latest_fetch_run: Record<string, unknown> | null;
+  recommendation_min_score: number;
   papers: ApiPaper[];
 };
 

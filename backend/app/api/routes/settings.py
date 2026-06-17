@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.feedback import UserPreferences
 from app.models.fetch import FetchCursor
 from app.models.keyword_group import KeywordGroup
 from app.models.scoring import ScoringWeights
@@ -14,6 +15,8 @@ from app.schemas.settings import (
     ScoringWeightsUpdate,
     SourceConfigRead,
     SourceConfigUpdate,
+    UserPreferencesRead,
+    UserPreferencesUpdate,
 )
 
 router = APIRouter()
@@ -120,3 +123,30 @@ def update_scoring_weights(
     db.commit()
     db.refresh(weights)
     return weights
+
+
+@router.get("/preferences", response_model=UserPreferencesRead)
+def get_user_preferences(db: Session = Depends(get_db)) -> UserPreferences:
+    preferences = db.query(UserPreferences).first()
+    if not preferences:
+        preferences = UserPreferences()
+        db.add(preferences)
+        db.commit()
+        db.refresh(preferences)
+    return preferences
+
+
+@router.put("/preferences", response_model=UserPreferencesRead)
+def update_user_preferences(
+    payload: UserPreferencesUpdate,
+    db: Session = Depends(get_db),
+) -> UserPreferences:
+    preferences = db.query(UserPreferences).first()
+    if not preferences:
+        preferences = UserPreferences()
+        db.add(preferences)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(preferences, field, value)
+    db.commit()
+    db.refresh(preferences)
+    return preferences

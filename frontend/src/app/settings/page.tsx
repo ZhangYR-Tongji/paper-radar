@@ -21,13 +21,15 @@ export default function SettingsPage() {
   const [sources, setSources] = useState<SourceConfig[]>([]);
   const [groups, setGroups] = useState<KeywordGroup[]>([]);
   const [weights, setWeights] = useState<Record<string, number>>({});
+  const [recommendationMinScore, setRecommendationMinScore] = useState(50);
   const [message, setMessage] = useState<string | null>(null);
 
   const loadSettings = async () => {
-    const [sourceData, groupData, scoringData] = await Promise.all([
+    const [sourceData, groupData, scoringData, preferencesData] = await Promise.all([
       apiGet<Record<string, unknown>[]>("/settings/sources"),
       apiGet<Record<string, unknown>[]>("/settings/keyword-groups"),
       apiGet<Record<string, unknown>>("/settings/scoring-weights"),
+      apiGet<Record<string, unknown>>("/settings/preferences"),
     ]);
     setSources(sourceData.map(mapSourceConfig));
     setGroups(groupData.map(mapKeywordGroup));
@@ -39,6 +41,9 @@ export default function SettingsPage() {
       user_preference_weight: Number(scoringData.user_preference_weight ?? 0),
       negative_filter_weight: Number(scoringData.negative_filter_weight ?? 0),
     });
+    setRecommendationMinScore(
+      Number(preferencesData.recommendation_min_score ?? 50),
+    );
   };
 
   useEffect(() => {
@@ -103,6 +108,15 @@ export default function SettingsPage() {
   const saveWeights = async () => {
     await apiSend("/settings/scoring-weights", "PUT", weights);
     setMessage("评分权重已保存");
+  };
+
+  const savePreferences = async () => {
+    const nextScore = Math.max(0, Math.min(100, recommendationMinScore));
+    await apiSend("/settings/preferences", "PUT", {
+      recommendation_min_score: nextScore,
+    });
+    setRecommendationMinScore(nextScore);
+    setMessage("推荐过滤已保存");
   };
 
   return (
@@ -236,6 +250,49 @@ export default function SettingsPage() {
             暂无关键词组。新建研究主题后即可检索。
           </div>
         )}
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-zinc-950">推荐过滤</h2>
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+            onClick={savePreferences}
+          >
+            <Save size={15} aria-hidden="true" />
+            保存过滤
+          </button>
+        </div>
+        <div className="grid gap-4 rounded-md border border-zinc-200 bg-white p-4 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-end">
+          <label className="text-sm font-medium text-zinc-700">
+            最低推荐评分
+            <input
+              className="mt-3 block w-full accent-zinc-900"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={recommendationMinScore}
+              onChange={(event) =>
+                setRecommendationMinScore(Number(event.target.value))
+              }
+            />
+          </label>
+          <label className="text-sm font-medium text-zinc-700">
+            分数
+            <input
+              className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={recommendationMinScore}
+              onChange={(event) =>
+                setRecommendationMinScore(Number(event.target.value))
+              }
+            />
+          </label>
+        </div>
       </section>
 
       <section>

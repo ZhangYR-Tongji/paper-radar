@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, Text
+from sqlalchemy import JSON, Boolean, Column, Float, ForeignKey, Integer, Text
 
 from app.db.session import Base
 from app.models.mixins import IdMixin, TimestampMixin
@@ -26,3 +26,4 @@ class UserPreferences(IdMixin, TimestampMixin, Base):
     method_weights = Column(JSON, default=dict, nullable=False)
     topic_weights = Column(JSON, default=dict, nullable=False)
     negative_keyword_weights = Column(JSON, default=dict, nullable=False)
+    recommendation_min_score = Column(Float, default=50.0, nullable=False)

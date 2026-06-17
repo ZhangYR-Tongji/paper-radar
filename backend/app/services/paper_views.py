@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models.feedback import UserFeedback
+from app.models.feedback import UserFeedback, UserPreferences
 from app.models.fetch import FetchRun, FetchRunItem
 from app.models.paper import Paper, PaperFeature
 
@@ -111,20 +111,17 @@ def list_paper_dicts(
 
 def latest_recommendations(db: Session) -> dict[str, object]:
     run = db.query(FetchRun).order_by(FetchRun.started_at.desc(), FetchRun.id.desc()).first()
+    min_score = _recommendation_min_score(db)
     papers = list_paper_dicts(
         db,
-        min_score=40,
+        min_score=min_score,
         sort_by="score",
         run=run,
     )
-    visible = [
-        paper
-        for paper in papers
-        if paper["classification"] in {"Highly Relevant", "Worth Checking", "Low Priority"}
-        and not paper["is_ignored"]
-    ]
+    visible = [paper for paper in papers if not paper["is_ignored"]]
     return {
         "latest_fetch_run": fetch_run_to_dict(db, run) if run else None,
+        "recommendation_min_score": min_score,
         "papers": visible,
     }
 
@@ -182,6 +179,13 @@ def fetch_run_item_to_dict(item: FetchRunItem) -> dict[str, object]:
 
 def default_latest_date_from(days: int = 30) -> date:
     return date.today() - timedelta(days=days)
+
+
+def _recommendation_min_score(db: Session) -> float:
+    preferences = db.query(UserPreferences).first()
+    if not preferences or preferences.recommendation_min_score is None:
+        return 50.0
+    return float(preferences.recommendation_min_score)
 
 
 def _date_string(value: date | None) -> str | None:
