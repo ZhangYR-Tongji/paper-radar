@@ -9,100 +9,23 @@ GitHub repository: https://github.com/ZhangYR-Tongji/paper-radar
 ```text
 backend/    FastAPI + SQLAlchemy 后端
 frontend/   Next.js + React + TypeScript + Tailwind 前端
+desktop/    Electron 桌面端壳
 doc.md      项目需求说明
 environment.yml
 ENVIRONMENT_SETUP.md
 ```
 
-## 启动环境
-
-```powershell
-conda activate paper-radar
-```
-
-## 一键启动
-
-Windows 下可直接双击项目根目录的 `start.bat`，或在 PowerShell 中执行：
-
-```powershell
-cd "C:\Users\10519\Desktop\paper ladar"
-.\start.ps1
-```
-
-启动脚本会自动检查 `paper-radar` Conda 环境、在缺少 `frontend/node_modules` 时安装前端依赖、初始化本地 SQLite 数据库，并分别打开后端与前端开发服务窗口。默认地址：
-
-```text
-Frontend: http://localhost:3000
-Backend:  http://127.0.0.1:8000
-Health:   http://127.0.0.1:8000/api/health
-```
-
-关闭项目时，关闭启动脚本打开的后端和前端 PowerShell 窗口即可。
-
-如需从零复现环境，参考 `ENVIRONMENT_SETUP.md`。
-
-## 启动后端
-
-```powershell
-cd backend
-python -m app.cli
-uvicorn app.main:app --reload --port 8000
-```
-
-后端健康检查：
-
-```powershell
-curl http://localhost:8000/api/health
-```
-
-## 常用 API
-
-清空所有检索运行记录：
-
-```powershell
-curl -X POST http://localhost:8000/api/fetch/runs/clear
-```
-
-该接口会删除 `fetch_runs`、`fetch_run_items` 和 `fetch_cursors`，并重置数据源的最近成功/错误状态；不会删除已入库论文、文献库、反馈、数据源配置或关键词组。如果当前有检索任务正在运行，接口会返回 `409`。
-
-## 启动前端
-
-```powershell
-cd frontend
-npm run dev
-```
-
-默认前端地址：
-
-```text
-http://localhost:3000
-```
-
-## 当前脚手架状态
-
-- 已创建 FastAPI 应用、数据库模型、Settings API、Fetch API、Paper API、Feedback API。
-- 已实现 arXiv、OpenAlex、Crossref、Semantic Scholar 元数据适配器；OSF 默认禁用。
-- 已实现手动增量 fetch、source × keyword group cursor、去重、规则评分、分类和反馈偏好更新。
-- 已创建 Next.js 应用壳和 MVP 页面路由：`/`、`/settings`、`/library`、`/feedback`、`/search`、`/fetch-runs/[id]`。
-- 前端页面已接入真实后端 API，可配置来源/关键词/权重、手动抓取、查看推荐、反馈和文献库。
-- 已支持单篇和文献库批量导出 `RIS` / `BibTeX`，可导入 Zotero。
-- 发布版不预置任何领域关键词组；用户在设置页新建的关键词组会保存到本地 SQLite 数据库。
-- 本地开发默认使用 SQLite，后续可通过 `DATABASE_URL` 切换 PostgreSQL。
-
-## GitHub 同步
-
-后续改动默认同步到 GitHub：
-
-```powershell
-git status
-git add <changed-files>
-git commit -m "描述本次改动"
-git push
-```
-
 ## 桌面端一键启动
 
-第一版桌面端是 Windows 本机桌面壳，仍依赖当前项目目录和 `paper-radar` Conda 环境。首次构建：
+Windows 用户优先使用项目根目录的快捷方式：
+
+```text
+Paper Radar.lnk
+```
+
+它指向 `desktop\dist\win-unpacked\Paper Radar.exe`，双击后会隐藏启动后端 `127.0.0.1:8000` 和前端 `localhost:3000`，不会弹出 PowerShell/CMD 窗口。关闭桌面窗口时，前端和后端后台进程会一起停止。
+
+首次构建或重新构建 Windows 桌面端：
 
 ```powershell
 cd "C:\Users\10519\Desktop\paper ladar\desktop"
@@ -110,19 +33,11 @@ npm install
 npm run build
 ```
 
-构建完成后，双击：
-
-```text
-Paper Radar.lnk
-```
-
-Windows 构建会在项目根目录自动生成 `Paper Radar.lnk`，它指向 `desktop\dist\win-unpacked\Paper Radar.exe`。如果移动了项目目录或需要手动重建快捷方式，可在项目根目录执行：
+Windows 构建会在项目根目录自动生成 `Paper Radar.lnk`。如果移动了项目目录或需要手动重建快捷方式，可在项目根目录执行：
 
 ```powershell
 .\create-windows-shortcut.ps1
 ```
-
-桌面应用会隐藏启动后端 `127.0.0.1:8000` 和前端 `localhost:3000`，不会弹出 PowerShell/CMD 窗口。关闭桌面窗口时，前端和后端后台进程会一起停止。
 
 如果 `3000` 或 `8000` 端口已被占用，桌面应用会弹出错误提示，请先关闭已有服务后再启动。运行日志写入：
 
@@ -164,4 +79,79 @@ export PAPER_RADAR_CONDA_ENV_DIR="/absolute/path/to/envs/paper-radar"
 ```text
 .runtime/logs/backend.log
 .runtime/logs/frontend.log
+```
+
+如需从零复现环境，参考 `ENVIRONMENT_SETUP.md`。
+
+## 开发环境
+
+```powershell
+conda activate paper-radar
+```
+
+默认开发服务地址：
+
+```text
+Frontend: http://localhost:3000
+Backend:  http://127.0.0.1:8000
+Health:   http://127.0.0.1:8000/api/health
+```
+
+## 开发：启动后端
+
+```powershell
+cd backend
+python -m app.cli
+uvicorn app.main:app --reload --port 8000
+```
+
+后端健康检查：
+
+```powershell
+curl http://localhost:8000/api/health
+```
+
+## 常用 API
+
+清空所有检索运行记录：
+
+```powershell
+curl -X POST http://localhost:8000/api/fetch/runs/clear
+```
+
+该接口会删除 `fetch_runs`、`fetch_run_items` 和 `fetch_cursors`，并重置数据源的最近成功/错误状态；不会删除已入库论文、文献库、反馈、数据源配置或关键词组。如果当前有检索任务正在运行，接口会返回 `409`。
+
+## 开发：启动前端
+
+```powershell
+cd frontend
+npm run dev
+```
+
+默认前端地址：
+
+```text
+http://localhost:3000
+```
+
+## 当前脚手架状态
+
+- 已创建 FastAPI 应用、数据库模型、Settings API、Fetch API、Paper API、Feedback API。
+- 已实现 arXiv、OpenAlex、Crossref、Semantic Scholar 元数据适配器；OSF 默认禁用。
+- 已实现手动增量 fetch、source × keyword group cursor、去重、规则评分、分类和反馈偏好更新。
+- 已创建 Next.js 应用壳和 MVP 页面路由：`/`、`/settings`、`/library`、`/feedback`、`/search`、`/fetch-runs/[id]`。
+- 前端页面已接入真实后端 API，可配置来源/关键词/权重、手动抓取、查看推荐、反馈和文献库。
+- 已支持单篇和文献库批量导出 `RIS` / `BibTeX`，可导入 Zotero。
+- 发布版不预置任何领域关键词组；用户在设置页新建的关键词组会保存到本地 SQLite 数据库。
+- 本地开发默认使用 SQLite，后续可通过 `DATABASE_URL` 切换 PostgreSQL。
+
+## GitHub 同步
+
+后续改动默认同步到 GitHub：
+
+```powershell
+git status
+git add <changed-files>
+git commit -m "描述本次改动"
+git push
 ```
