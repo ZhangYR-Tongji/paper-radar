@@ -3,10 +3,12 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 
 from app.db.session import Base
@@ -29,6 +31,15 @@ class FetchCursor(IdMixin, TimestampMixin, Base):
 
 class FetchRun(IdMixin, TimestampMixin, Base):
     __tablename__ = "fetch_runs"
+    __table_args__ = (
+        Index(
+            "uq_running_fetch_run",
+            "status",
+            unique=True,
+            sqlite_where=text("status = 'running'"),
+            postgresql_where=text("status = 'running'"),
+        ),
+    )
 
     trigger_type = Column(String(32), default="manual", nullable=False)
     status = Column(String(32), default="running", index=True, nullable=False)

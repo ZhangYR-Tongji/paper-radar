@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ManualFetchRequest(BaseModel):
@@ -13,6 +13,26 @@ class ManualFetchRequest(BaseModel):
     date_from: datetime | None = None
     date_to: datetime | None = None
     overlap_buffer_days: int = Field(default=3, ge=0)
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> "ManualFetchRequest":
+        if self.mode in {"custom_range", "historical_backfill"}:
+            if self.date_from is None:
+                raise ValueError("date_from is required for custom range modes.")
+            start = (
+                self.date_from.replace(tzinfo=UTC)
+                if self.date_from.tzinfo is None
+                else self.date_from.astimezone(UTC)
+            )
+            end_value = self.date_to or datetime.now(UTC)
+            end = (
+                end_value.replace(tzinfo=UTC)
+                if end_value.tzinfo is None
+                else end_value.astimezone(UTC)
+            )
+            if start > end:
+                raise ValueError("date_from must be earlier than date_to.")
+        return self
 
 
 class FetchStatusRead(BaseModel):

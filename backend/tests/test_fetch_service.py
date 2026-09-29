@@ -1,14 +1,24 @@
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from fastapi import HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.routes.fetch import clear_fetch_runs
+from app.db.base import recover_interrupted_fetch_runs
 from app.db.session import Base
-from app.models import FetchCursor, FetchRun, FetchRunItem, KeywordGroup, Paper, SourceConfig
+from app.models import (
+    FetchCursor,
+    FetchRun,
+    FetchRunItem,
+    KeywordGroup,
+    Paper,
+    PaperFeature,
+    SourceConfig,
+)
 from app.models.scoring import ScoringWeights
 from app.schemas.fetch import ManualFetchRequest
 from app.services import fetch_service
@@ -50,6 +60,92 @@ def test_manual_fetch_requires_keyword_group(db_session: Session) -> None:
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "请先在设置中创建并启用至少一个关键词组。"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"mode": "custom_range"},
+        {
+            "mode": "historical_backfill",
+            "date_from": "2026-09-30T00:00:00Z",
+            "date_to": "2026-09-29T00:00:00Z",
+        },
+    ],
+)
+def test_invalid_range_is_rejected_before_creating_run(
+    db_session: Session,
+    payload: dict[str, str],
+) -> None:
+    with pytest.raises(ValidationError):
+        run_manual_fetch(db_session, ManualFetchRequest(**payload))
+    assert db_session.query(FetchRun).count() == 0
+
+
+def test_database_failure_rolls_back_item_and_allows_retry(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add_all(
+        [
+            SourceConfig(source_name="arxiv", display_name="arXiv", daily_limit=5),
+            KeywordGroup(name="Robotics", positive_keywords=["robotics"]),
+            ScoringWeights(),
+        ],
+    )
+    db_session.commit()
+
+    class FakeAdapter:
+        def search(self, query: str, limit: int, date_from=None, date_to=None):
+            return [
+                PaperResult(
+                    title="Robotics paper",
+                    abstract="robotics",
+                    source="arxiv",
+                    published_date=date.today(),
+                ),
+            ]
+
+    original_score_paper = fetch_service.score_paper
+
+    def fail_scoring(db: Session, paper: Paper) -> None:
+        db.add(PaperFeature(paper_id=None))
+        db.flush()
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", FakeAdapter())
+    monkeypatch.setattr(fetch_service, "score_paper", fail_scoring)
+    failed = run_manual_fetch(db_session, ManualFetchRequest())
+    assert failed.status == "failed"
+    assert db_session.query(Paper).count() == 0
+    assert db_session.query(FetchRunItem).one().status == "failed"
+
+    monkeypatch.setattr(fetch_service, "score_paper", original_score_paper)
+    retried = run_manual_fetch(db_session, ManualFetchRequest())
+    assert retried.status == "success"
+    assert db_session.query(Paper).count() == 1
+    assert db_session.query(PaperFeature).count() == 1
+
+
+def test_startup_recovers_interrupted_run(db_session: Session) -> None:
+    group = KeywordGroup(name="Robotics")
+    db_session.add(group)
+    db_session.flush()
+    run = FetchRun(status="running", started_at=datetime.now(UTC))
+    db_session.add(run)
+    db_session.flush()
+    item = FetchRunItem(
+        fetch_run_id=run.id,
+        source_name="arxiv",
+        keyword_group_id=group.id,
+        status="running",
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    recover_interrupted_fetch_runs(db_session)
+    assert run.status == "failed"
+    assert run.finished_at is not None
+    assert item.status == "failed"
 
 
 def test_historical_backfill_splits_windows_without_advancing_cursor(

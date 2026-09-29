@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -72,8 +73,55 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
         ],
     )
     db.add(run)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another fetch is already running.",
+        ) from exc
     db.refresh(run)
+
+    run_id = run.id
+    try:
+        return _execute_fetch_items(
+            db,
+            payload,
+            run,
+            sources,
+            keyword_groups,
+            fetch_to,
+            settings.first_run_lookback_days,
+        )
+    except Exception as exc:
+        db.rollback()
+        run = db.get(FetchRun, run_id)
+        if run and run.status == "running":
+            run.status = "failed"
+            run.finished_at = datetime.now(UTC)
+            run.error_count += 1
+            run.error_summary = f"检索未完成：{exc}"
+            for item in db.query(FetchRunItem).filter(
+                FetchRunItem.fetch_run_id == run_id,
+                FetchRunItem.status == "running",
+            ):
+                item.status = "failed"
+                item.finished_at = datetime.now(UTC)
+                item.error_message = str(exc)
+            db.commit()
+        raise
+
+
+def _execute_fetch_items(
+    db: Session,
+    payload: ManualFetchRequest,
+    run: FetchRun,
+    sources: list[SourceConfig],
+    keyword_groups: list[KeywordGroup],
+    fetch_to: datetime,
+    first_run_lookback_days: int,
+) -> FetchRun:
 
     error_messages: list[str] = []
     fetch_from_values: list[datetime] = []
@@ -82,6 +130,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
         adapter = ADAPTERS.get(source.source_name)
         if not adapter:
             error_messages.append(f"{source.source_name}: adapter not found")
+            run.error_count += 1
             continue
 
         per_group_limit = max(source.daily_limit, 1)
@@ -95,7 +144,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
                 payload=payload,
                 cursor=cursor,
                 fetch_to=fetch_to,
-                first_run_lookback_days=settings.first_run_lookback_days,
+                first_run_lookback_days=first_run_lookback_days,
             )
 
             for fetch_from, window_fetch_to in fetch_windows:
@@ -112,6 +161,8 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
                 db.add(item)
                 db.commit()
                 db.refresh(item)
+                item_id = item.id
+                cursor_scope = (source.source_name, group.id) if cursor else None
 
                 try:
                     query = build_query(group)
@@ -136,7 +187,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
                     item.finished_at = datetime.now(UTC)
 
                     if cursor:
-                        cursor.last_successful_until = fetch_to
+                        cursor.last_successful_until = window_fetch_to
                         cursor.last_run_id = run.id
                         cursor.last_status = "success"
                         cursor.last_error_message = None
@@ -151,6 +202,13 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
                     run.total_low_priority += counts["low_priority"]
                     db.commit()
                 except Exception as exc:  # noqa: BLE001
+                    db.rollback()
+                    run = db.get(FetchRun, run.id)
+                    item = db.get(FetchRunItem, item_id)
+                    source = db.get(SourceConfig, source.id)
+                    cursor = (
+                        _get_or_create_cursor(db, *cursor_scope) if cursor_scope else None
+                    )
                     message = f"{source.source_name} × {group.name}: {exc}"
                     error_messages.append(message)
                     item.status = "failed"
@@ -170,7 +228,10 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
 
     if run.error_count == 0:
         run.status = "success"
-    elif run.total_raw_results > 0 or run.total_new_papers > 0:
+    elif db.query(FetchRunItem).filter(
+        FetchRunItem.fetch_run_id == run.id,
+        FetchRunItem.status == "success",
+    ).first():
         run.status = "partial_success"
     else:
         run.status = "failed"
