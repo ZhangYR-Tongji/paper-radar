@@ -164,13 +164,31 @@ def _execute_fetch_items(
 
             remaining_budget = per_group_limit
             for window_index, (fetch_from, window_fetch_to) in enumerate(fetch_windows):
+                previous = previous_items[window_index] if cursor is None else None
+                if resuming_range and previous and previous.status == "success":
+                    continue
                 if remaining_budget == 0:
+                    if cursor is None:
+                        message = "本次来源配额已用完；下次检索将继续此时间范围。"
+                        db.add(
+                            FetchRunItem(
+                                fetch_run_id=run.id,
+                                source_name=source.source_name,
+                                keyword_group_id=group.id,
+                                fetch_from=fetch_from,
+                                fetch_to=window_fetch_to,
+                                status="partial_limit",
+                                error_message=message,
+                                started_at=datetime.now(UTC),
+                                finished_at=datetime.now(UTC),
+                            )
+                        )
+                        run.error_count += 1
+                        error_messages.append(f"{source.source_name} × {group.name}: {message}")
+                        db.commit()
                     break
                 fetch_from_values.append(fetch_from)
                 if cursor is None:
-                    previous = previous_items[window_index]
-                    if resuming_range and previous and previous.status == "success":
-                        continue
                     resume_cursor = previous.resume_cursor if resuming_range and previous else None
                 else:
                     resume_cursor = cursor.next_page_cursor

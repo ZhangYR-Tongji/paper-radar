@@ -66,12 +66,20 @@ def latest_papers(
 
 @router.get("/library")
 def library_papers(
+    filter: Literal["all", "saved", "core", "read"] = "all",
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
     return list_paper_dicts(
-        db, in_library=True, sort_by="library", limit=limit, offset=offset
+        db,
+        in_library=True,
+        is_saved=True if filter == "saved" else None,
+        is_core=True if filter == "core" else None,
+        is_read=True if filter == "read" else None,
+        sort_by="library",
+        limit=limit,
+        offset=offset,
     )
 
 

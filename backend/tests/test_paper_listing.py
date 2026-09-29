@@ -77,6 +77,15 @@ def test_paper_filters_and_run_lists_page_at_database_boundary() -> None:
             assert library.status_code == 200
             assert [paper["title"] for paper in library.json()] == ["Robotics field trial"]
 
+            saved = client.get("/api/papers/library", params={"filter": "saved"})
+            read = client.get("/api/papers/library", params={"filter": "read"})
+            assert [paper["title"] for paper in saved.json()] == [
+                "Robotics aerial study"
+            ]
+            assert [paper["title"] for paper in read.json()] == [
+                "Robotics field trial"
+            ]
+
             run_page = client.get(f"/api/fetch/runs/{first_run.id}", params={"limit": 1})
             assert run_page.status_code == 200
             assert [paper["title"] for paper in run_page.json()["papers"]] == [

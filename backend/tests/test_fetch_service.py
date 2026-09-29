@@ -399,6 +399,51 @@ def test_historical_backfill_splits_windows_without_advancing_cursor(
     assert db_session.query(FetchRunItem).count() == 3
 
 
+def test_backfill_continues_next_window_when_budget_ends_at_page_boundary(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add_all(
+        [
+            SourceConfig(source_name="arxiv", display_name="arXiv", daily_limit=1),
+            KeywordGroup(name="Research", positive_keywords=["research"]),
+            ScoringWeights(),
+        ],
+    )
+    db_session.commit()
+    searched_windows: list[datetime] = []
+
+    class OnePaperPerWindow:
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
+            searched_windows.append(date_from)
+            return SearchPage([
+                PaperResult(
+                    title=f"Research in {date_from.date()}",
+                    source="arxiv",
+                    published_date=date_from.date(),
+                    source_id=f"paper-{date_from.date()}",
+                ),
+            ])
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", OnePaperPerWindow())
+    request = ManualFetchRequest(
+        mode="historical_backfill",
+        date_from=datetime(2024, 1, 1, tzinfo=UTC),
+        date_to=datetime(2024, 7, 15, tzinfo=UTC),
+    )
+    runs = [run_manual_fetch(db_session, request) for _ in range(3)]
+
+    assert [run.status for run in runs] == ["partial_success", "partial_success", "success"]
+    assert [window.date() for window in searched_windows] == [
+        date(2024, 1, 1),
+        date(2024, 3, 31),
+        date(2024, 6, 29),
+    ]
+    assert db_session.query(Paper).count() == 3
+
+
 def test_clear_fetch_runs_deletes_fetch_records_only(db_session: Session) -> None:
     group = KeywordGroup(name="Aerial manipulation", positive_keywords=["aerial manipulation"])
     paper = Paper(
