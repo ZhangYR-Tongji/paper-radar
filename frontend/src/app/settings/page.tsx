@@ -60,7 +60,9 @@ export default function SettingsPage() {
       metadata_only: patch.metadataOnly,
     };
     await apiSend(`/settings/sources/${id}`, "PUT", payload);
-    await loadSettings();
+    setSources((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
     setMessage("数据源已保存");
   };
 
@@ -75,12 +77,11 @@ export default function SettingsPage() {
       required_keywords: normalizeKeywords(group.requiredKeywords),
       optional_keywords: normalizeKeywords(group.optionalKeywords),
     });
-    await loadSettings();
     setMessage("关键词组已保存");
   };
 
   const createGroup = async () => {
-    await apiSend("/settings/keyword-groups", "POST", {
+    const created = await apiSend<Record<string, unknown>>("/settings/keyword-groups", "POST", {
       name: `新关键词组 ${Date.now()}`,
       description: "",
       is_enabled: true,
@@ -91,17 +92,17 @@ export default function SettingsPage() {
       optional_keywords: [],
       related_tags: [],
     });
-    await loadSettings();
+    setGroups((current) => [...current, mapKeywordGroup(created)]);
   };
 
   const deleteGroup = async (id: number) => {
     await apiSend(`/settings/keyword-groups/${id}`, "DELETE");
-    await loadSettings();
+    setGroups((current) => current.filter((group) => group.id !== id));
   };
 
   const clearGroups = async () => {
     await apiSend("/settings/keyword-groups/clear", "POST");
-    await loadSettings();
+    setGroups([]);
     setMessage("关键词组已清空");
   };
 

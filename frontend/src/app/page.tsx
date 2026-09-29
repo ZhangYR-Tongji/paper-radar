@@ -2,7 +2,7 @@
 
 import { CalendarClock, Play, RotateCw, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Metric } from "@/components/metric";
 import { PageHeader } from "@/components/page-header";
@@ -49,12 +49,15 @@ const dateEndIso = (value: string) =>
   new Date(`${value}T23:59:59.999`).toISOString();
 
 const filters = ["最新运行", "近 7 天", "近 30 天", "全部未读"];
+const PAGE_SIZE = 50;
 
 export default function Home() {
   const [papers, setPapers] = useState<Paper[]>([]);
   const [latestRun, setLatestRun] = useState<FetchRun | null>(null);
   const [activeFilter, setActiveFilter] = useState(filters[0]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const [isBackfilling, setIsBackfilling] = useState(false);
   const [isClearingRuns, setIsClearingRuns] = useState(false);
@@ -64,18 +67,56 @@ export default function Home() {
   const [backfillTo, setBackfillTo] = useState(() => dateInputValue(new Date()));
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
 
-  const loadLatest = useCallback(async () => {
+  const loadLatest = useCallback(async (offset = 0) => {
+    const currentRequest = ++requestId.current;
+    if (offset === 0) setIsLoading(true);
+    else setIsLoadingMore(true);
     setError(null);
-    const data = await apiGet<LatestResponse>("/papers/latest");
-    setLatestRun(mapFetchRun(data.latest_fetch_run));
-    setPapers(data.papers.map(mapPaper));
-  }, []);
+    try {
+      const data = await apiGet<LatestResponse>(
+        `/papers/latest?limit=${PAGE_SIZE}&offset=${activeFilter === "最新运行" ? offset : 0}`,
+      );
+      const params = new URLSearchParams({
+        min_score: String(data.recommendation_min_score),
+        is_ignored: "false",
+        sort_by: "score",
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+      });
+      if (activeFilter === "近 7 天" || activeFilter === "近 30 天") {
+        const days = activeFilter === "近 7 天" ? 7 : 30;
+        const start = new Date();
+        start.setDate(start.getDate() - days);
+        params.set("date_from", dateInputValue(start));
+      } else if (activeFilter === "全部未读") {
+        params.set("is_read", "false");
+      }
+      const page = activeFilter === "最新运行"
+        ? data.papers
+        : await apiGet<ApiPaper[]>(`/papers?${params.toString()}`);
+      if (currentRequest !== requestId.current) return;
+      setLatestRun(mapFetchRun(data.latest_fetch_run));
+      setPapers((current) =>
+        offset === 0 ? page.map(mapPaper) : [...current, ...page.map(mapPaper)],
+      );
+      setHasMore(page.length === PAGE_SIZE);
+    } catch (err) {
+      if (currentRequest === requestId.current) {
+        setError(err instanceof Error ? err.message : "加载推荐失败");
+      }
+      throw err;
+    } finally {
+      if (currentRequest === requestId.current) {
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
+    }
+  }, [activeFilter]);
 
   useEffect(() => {
-    loadLatest()
-      .catch((err: Error) => setError(err.message))
-      .finally(() => setIsLoading(false));
+    loadLatest().catch(() => {});
   }, [loadLatest]);
 
   const startFetch = async () => {
@@ -174,26 +215,6 @@ export default function Home() {
     await apiSend(`/papers/${paperId}/feedback`, "PUT", payload);
     await loadLatest();
   };
-
-  const filteredPapers = useMemo(() => {
-    const now = new Date();
-    return papers.filter((paper) => {
-      if (activeFilter === "全部未读") {
-        return !paper.isRead;
-      }
-      if (!paper.date) {
-        return true;
-      }
-      const ageDays = (now.getTime() - new Date(paper.date).getTime()) / 86400000;
-      if (activeFilter === "近 7 天") {
-        return ageDays <= 7;
-      }
-      if (activeFilter === "近 30 天") {
-        return ageDays <= 30;
-      }
-      return true;
-    });
-  }, [activeFilter, papers]);
 
   return (
     <>
@@ -321,7 +342,7 @@ export default function Home() {
           </div>
           <button
             className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-            onClick={loadLatest}
+            onClick={() => loadLatest().catch(() => {})}
           >
             <RotateCw size={15} aria-hidden="true" />
             刷新状态
@@ -364,9 +385,9 @@ export default function Home() {
         <div className="rounded-md border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
           正在加载推荐...
         </div>
-      ) : filteredPapers.length ? (
+      ) : papers.length ? (
         <div className="space-y-4">
-          {filteredPapers.map((paper) => (
+          {papers.map((paper) => (
             <PaperCard key={paper.id} paper={paper} onFeedback={updateFeedback} />
           ))}
         </div>
@@ -375,6 +396,11 @@ export default function Home() {
           暂无论文。点击“开始检索新论文”获取最新结果。
         </div>
       )}
+      {hasMore && !isLoading ? (
+        <button className="mt-5 w-full rounded-md border border-zinc-200 bg-white p-3 text-sm font-medium hover:bg-zinc-50 disabled:text-zinc-400" disabled={isLoadingMore} onClick={() => loadLatest(papers.length).catch(() => {})}>
+          {isLoadingMore ? "加载中..." : "加载更多"}
+        </button>
+      ) : null}
     </>
   );
 }

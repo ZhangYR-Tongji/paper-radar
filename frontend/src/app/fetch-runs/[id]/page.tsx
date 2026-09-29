@@ -10,17 +10,39 @@ import { PaperCard } from "@/components/paper-card";
 import { apiGet, apiSend, mapFetchRun } from "@/lib/api";
 import type { FeedbackPayload, FetchRun } from "@/lib/types";
 
+const PAGE_SIZE = 50;
+
 export default function FetchRunPage() {
   const params = useParams<{ id: string }>();
   const [run, setRun] = useState<FetchRun | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadRun = useCallback(async () => {
-    const data = await apiGet<Record<string, unknown>>(`/fetch/runs/${params.id}`);
-    setRun(mapFetchRun(data));
+  const loadRun = useCallback(async (offset = 0) => {
+    if (offset > 0) setIsLoadingMore(true);
+    setError(null);
+    try {
+      const data = await apiGet<Record<string, unknown>>(
+        `/fetch/runs/${params.id}?limit=${PAGE_SIZE}&offset=${offset}`,
+      );
+      const mapped = mapFetchRun(data);
+      if (!mapped) return;
+      setRun((current) =>
+        offset === 0 || !current
+          ? mapped
+          : { ...mapped, papers: [...current.papers, ...mapped.papers] },
+      );
+      setHasMore(mapped.papers.length === PAGE_SIZE);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载抓取记录失败");
+    } finally {
+      setIsLoadingMore(false);
+    }
   }, [params.id]);
 
   useEffect(() => {
-    loadRun().catch(console.error);
+    loadRun();
   }, [loadRun]);
 
   const updateFeedback = async (paperId: number, payload: FeedbackPayload) => {
@@ -34,6 +56,7 @@ export default function FetchRunPage() {
         title={`抓取记录 #${params.id}`}
         description="用于排查一次检索运行的过程、错误和去重结果。每个数据源 × 关键词组都会单独记录状态，只有成功项会推进 cursor。"
       />
+      {error ? <p className="mb-4 text-sm text-rose-700">{error}</p> : null}
 
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <Metric label="原始结果" value={run?.totalRawResults ?? 0} />
@@ -109,6 +132,11 @@ export default function FetchRunPage() {
             暂无新增论文。
           </div>
         )}
+        {hasMore ? (
+          <button className="mt-5 w-full rounded-md border border-zinc-200 bg-white p-3 text-sm font-medium hover:bg-zinc-50 disabled:text-zinc-400" disabled={isLoadingMore} onClick={() => loadRun(run?.papers.length ?? 0)}>
+            {isLoadingMore ? "加载中..." : "加载更多"}
+          </button>
+        ) : null}
       </section>
     </>
   );
