@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import date
 
 from pydantic import BaseModel
@@ -22,10 +23,15 @@ class PaperResult(BaseModel):
     year: int | None = None
 
 
+@dataclass
+class SearchPage:
+    papers: list[PaperResult]
+    next_cursor: str | None = None
+
+
 class BaseSourceAdapter(ABC):
     source_name: str
 
-    @abstractmethod
     def search(
         self,
         query: str,
@@ -33,6 +39,17 @@ class BaseSourceAdapter(ABC):
         date_from=None,
         date_to=None,
     ) -> list[PaperResult]:
+        return self.search_page(query, limit, date_from, date_to).papers
+
+    @abstractmethod
+    def search_page(
+        self,
+        query: str,
+        limit: int,
+        date_from=None,
+        date_to=None,
+        cursor: str | None = None,
+    ) -> SearchPage:
         raise NotImplementedError
 
 

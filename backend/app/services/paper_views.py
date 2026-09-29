@@ -89,8 +89,8 @@ def list_paper_dicts(
         query = query.filter(UserFeedback.is_read.is_(is_read))
     if is_core is not None:
         query = query.filter(UserFeedback.is_core.is_(is_core))
-    if run and run.started_at:
-        query = query.filter(Paper.created_at >= run.started_at)
+    if run:
+        query = query.filter(Paper.first_seen_run_id == run.id)
 
     rows = query.all()
     papers = [paper_to_dict(paper, feature, feedback) for paper, feature, feedback in rows]

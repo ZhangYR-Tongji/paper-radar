@@ -28,7 +28,7 @@ ADAPTERS = {
 }
 
 BACKFILL_WINDOW_DAYS = 90
-CURSOR_ADVANCING_MODES = {"since_last_success", "custom_range"}
+CURSOR_ADVANCING_MODES = {"since_last_success"}
 
 
 def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
@@ -146,9 +146,33 @@ def _execute_fetch_items(
                 fetch_to=fetch_to,
                 first_run_lookback_days=first_run_lookback_days,
             )
+            previous_items = (
+                [
+                    _previous_range_item(
+                        db, payload.mode, source.source_name, group.id, start, end
+                    )
+                    for start, end in fetch_windows
+                ]
+                if cursor is None
+                else []
+            )
+            resuming_range = any(
+                item and item.status in {"partial_limit", "failed"}
+                for item in previous_items
+            )
 
-            for fetch_from, window_fetch_to in fetch_windows:
+            remaining_budget = per_group_limit
+            for window_index, (fetch_from, window_fetch_to) in enumerate(fetch_windows):
+                if remaining_budget == 0:
+                    break
                 fetch_from_values.append(fetch_from)
+                if cursor is None:
+                    previous = previous_items[window_index]
+                    if resuming_range and previous and previous.status == "success":
+                        continue
+                    resume_cursor = previous.resume_cursor if resuming_range and previous else None
+                else:
+                    resume_cursor = cursor.next_page_cursor
                 item = FetchRunItem(
                     fetch_run_id=run.id,
                     source_name=source.source_name,
@@ -156,6 +180,7 @@ def _execute_fetch_items(
                     fetch_from=fetch_from,
                     fetch_to=window_fetch_to,
                     status="running",
+                    resume_cursor=resume_cursor,
                     started_at=datetime.now(UTC),
                 )
                 db.add(item)
@@ -166,41 +191,73 @@ def _execute_fetch_items(
 
                 try:
                     query = build_query(group)
-                    raw_results = adapter.search(
-                        query=query,
-                        limit=per_group_limit,
-                        date_from=fetch_from,
-                        date_to=window_fetch_to,
-                    )
-                    filtered_results = [
-                        result
-                        for result in raw_results
-                        if _result_in_range(result, fetch_from, window_fetch_to)
-                    ]
+                    while remaining_budget > 0:
+                        page_size = min(remaining_budget, 100)
+                        page = adapter.search_page(
+                            query=query,
+                            limit=page_size,
+                            date_from=fetch_from,
+                            date_to=window_fetch_to,
+                            cursor=resume_cursor,
+                        )
+                        if page.next_cursor and (
+                            page.next_cursor == resume_cursor or not page.papers
+                        ):
+                            raise ValueError("Source returned an invalid next-page cursor.")
+                        filtered_results = [
+                            result
+                            for result in page.papers
+                            if _result_in_range(result, fetch_from, window_fetch_to)
+                        ]
+                        counts = _store_results(db, filtered_results, run.id)
+                        item.raw_result_count += len(page.papers)
+                        item.new_paper_count += counts["new"]
+                        item.duplicate_count += counts["duplicate"]
+                        item.resume_cursor = page.next_cursor
+                        run.total_raw_results += len(page.papers)
+                        run.total_new_papers += counts["new"]
+                        run.total_duplicate_papers += counts["duplicate"]
+                        run.total_scored_papers += counts["scored"]
+                        run.total_highly_relevant += counts["highly_relevant"]
+                        run.total_low_priority += counts["low_priority"]
+                        remaining_budget -= len(page.papers)
 
-                    counts = _store_results(db, filtered_results)
-
-                    item.status = "success"
-                    item.raw_result_count = len(raw_results)
-                    item.new_paper_count = counts["new"]
-                    item.duplicate_count = counts["duplicate"]
-                    item.finished_at = datetime.now(UTC)
-
-                    if cursor:
-                        cursor.last_successful_until = window_fetch_to
-                        cursor.last_run_id = run.id
-                        cursor.last_status = "success"
-                        cursor.last_error_message = None
-                    source.last_success_at = datetime.now(UTC)
-                    source.last_error_message = None
-
-                    run.total_raw_results += len(raw_results)
-                    run.total_new_papers += counts["new"]
-                    run.total_duplicate_papers += counts["duplicate"]
-                    run.total_scored_papers += counts["scored"]
-                    run.total_highly_relevant += counts["highly_relevant"]
-                    run.total_low_priority += counts["low_priority"]
-                    db.commit()
+                        if page.next_cursor:
+                            if cursor:
+                                cursor.pending_from = fetch_from
+                                cursor.pending_to = window_fetch_to
+                                cursor.next_page_cursor = page.next_cursor
+                                cursor.last_status = "partial_limit"
+                            if remaining_budget == 0:
+                                item.status = "partial_limit"
+                                item.finished_at = datetime.now(UTC)
+                                item.error_message = "结果尚未取完；下次检索将继续此时间范围。"
+                                run.error_count += 1
+                                error_messages.append(
+                                    f"{source.source_name} × {group.name}: {item.error_message}"
+                                )
+                        else:
+                            item.status = "success"
+                            item.finished_at = datetime.now(UTC)
+                            if cursor:
+                                previous_until = cursor.last_successful_until
+                                if (
+                                    not previous_until
+                                    or _ensure_utc(previous_until) < window_fetch_to
+                                ):
+                                    cursor.last_successful_until = window_fetch_to
+                                cursor.pending_from = None
+                                cursor.pending_to = None
+                                cursor.next_page_cursor = None
+                                cursor.last_run_id = run.id
+                                cursor.last_status = "success"
+                                cursor.last_error_message = None
+                            source.last_success_at = datetime.now(UTC)
+                            source.last_error_message = None
+                        db.commit()
+                        if not page.next_cursor:
+                            break
+                        resume_cursor = page.next_cursor
                 except Exception as exc:  # noqa: BLE001
                     db.rollback()
                     run = db.get(FetchRun, run.id)
@@ -221,6 +278,8 @@ def _execute_fetch_items(
                     source.last_error_message = str(exc)
                     run.error_count += 1
                     db.commit()
+                if item.status != "success":
+                    break
 
     run.finished_at = datetime.now(UTC)
     run.requested_from = min(fetch_from_values) if fetch_from_values else None
@@ -228,9 +287,8 @@ def _execute_fetch_items(
 
     if run.error_count == 0:
         run.status = "success"
-    elif db.query(FetchRunItem).filter(
-        FetchRunItem.fetch_run_id == run.id,
-        FetchRunItem.status == "success",
+    elif run.total_raw_results or db.query(FetchRunItem).filter(
+        FetchRunItem.fetch_run_id == run.id, FetchRunItem.status == "success"
     ).first():
         run.status = "partial_success"
     else:
@@ -280,6 +338,30 @@ def _get_or_create_cursor(db: Session, source_name: str, group_id: int) -> Fetch
     return cursor
 
 
+def _previous_range_item(
+    db: Session,
+    mode: str,
+    source_name: str,
+    group_id: int,
+    fetch_from: datetime,
+    fetch_to: datetime,
+) -> FetchRunItem | None:
+    return (
+        db.query(FetchRunItem)
+        .join(FetchRun, FetchRun.id == FetchRunItem.fetch_run_id)
+        .filter(
+            FetchRun.trigger_type == mode,
+            FetchRunItem.source_name == source_name,
+            FetchRunItem.keyword_group_id == group_id,
+            FetchRunItem.fetch_from == fetch_from,
+            FetchRunItem.fetch_to == fetch_to,
+            FetchRunItem.status.in_(["success", "partial_limit", "failed"]),
+        )
+        .order_by(FetchRunItem.id.desc())
+        .first()
+    )
+
+
 def _compute_fetch_windows(
     payload: ManualFetchRequest,
     cursor: FetchCursor | None,
@@ -302,6 +384,10 @@ def _compute_fetch_windows(
             return _split_backfill_windows(fetch_from, fetch_to)
         return [(fetch_from, fetch_to)]
 
+    if cursor and cursor.next_page_cursor:
+        if not cursor.pending_from or not cursor.pending_to:
+            raise ValueError("Fetch cursor has an incomplete pending window.")
+        return [(_ensure_utc(cursor.pending_from), _ensure_utc(cursor.pending_to))]
     if cursor and cursor.last_successful_until:
         fetch_from = _ensure_utc(cursor.last_successful_until) - timedelta(
             days=payload.overlap_buffer_days,
@@ -327,7 +413,9 @@ def _split_backfill_windows(
     return windows
 
 
-def _store_results(db: Session, filtered_results: list[PaperResult]) -> dict[str, int]:
+def _store_results(
+    db: Session, filtered_results: list[PaperResult], run_id: int
+) -> dict[str, int]:
     counts = {
         "new": 0,
         "duplicate": 0,
@@ -343,6 +431,7 @@ def _store_results(db: Session, filtered_results: list[PaperResult]) -> dict[str
             continue
 
         paper = _paper_from_result(result)
+        paper.first_seen_run_id = run_id
         db.add(paper)
         db.flush()
         feature = score_paper(db, paper)

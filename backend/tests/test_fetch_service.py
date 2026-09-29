@@ -23,7 +23,8 @@ from app.models.scoring import ScoringWeights
 from app.schemas.fetch import ManualFetchRequest
 from app.services import fetch_service
 from app.services.fetch_service import run_manual_fetch
-from app.sources.base import PaperResult
+from app.services.paper_views import fetch_run_to_dict
+from app.sources.base import PaperResult, SearchPage
 
 
 @pytest.fixture()
@@ -96,15 +97,17 @@ def test_database_failure_rolls_back_item_and_allows_retry(
     db_session.commit()
 
     class FakeAdapter:
-        def search(self, query: str, limit: int, date_from=None, date_to=None):
-            return [
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
+            return SearchPage([
                 PaperResult(
                     title="Robotics paper",
                     abstract="robotics",
                     source="arxiv",
                     published_date=date.today(),
                 ),
-            ]
+            ])
 
     original_score_paper = fetch_service.score_paper
 
@@ -148,6 +151,181 @@ def test_startup_recovers_interrupted_run(db_session: Session) -> None:
     assert item.status == "failed"
 
 
+def test_incremental_fetch_resumes_pages_without_skipping_papers(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add_all(
+        [
+            SourceConfig(source_name="arxiv", display_name="arXiv", daily_limit=2),
+            KeywordGroup(name="Research", positive_keywords=["research"]),
+            ScoringWeights(),
+        ],
+    )
+    db_session.commit()
+    titles = [
+        "Robotics research in flight",
+        "Research on climate proxies",
+        "Ecological research methods",
+        "Medical imaging research",
+        "Research into ancient ceramics",
+    ]
+    papers = [
+        PaperResult(
+            title=title,
+            source="arxiv",
+            published_date=date.today(),
+            doi=f"10.1234/{index}",
+        )
+        for index, title in enumerate(titles)
+    ]
+    seen_cursors: list[str | None] = []
+
+    class PagingAdapter:
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
+            seen_cursors.append(cursor)
+            offset = int(cursor or 0)
+            next_offset = offset + limit
+            return SearchPage(
+                papers[offset:next_offset],
+                str(next_offset) if next_offset < len(papers) else None,
+            )
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", PagingAdapter())
+    first = run_manual_fetch(db_session, ManualFetchRequest())
+    cursor = db_session.query(FetchCursor).one()
+    assert first.status == "partial_success"
+    assert cursor.last_successful_until is None
+    assert cursor.next_page_cursor == "2"
+
+    second = run_manual_fetch(db_session, ManualFetchRequest())
+    assert second.status == "partial_success"
+    assert cursor.next_page_cursor == "4"
+
+    third = run_manual_fetch(db_session, ManualFetchRequest())
+    assert third.status == "success"
+    assert cursor.last_successful_until is not None
+    assert cursor.next_page_cursor is None
+    assert seen_cursors == [None, "2", "4"]
+    assert db_session.query(Paper).count() == 5
+    papers_per_run = [
+        len(fetch_run_to_dict(db_session, run)["papers"])
+        for run in (first, second, third)
+    ]
+    assert papers_per_run == [
+        2,
+        2,
+        1,
+    ]
+
+
+def test_historical_backfill_resumes_without_touching_incremental_cursor(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add_all(
+        [
+            SourceConfig(source_name="arxiv", display_name="arXiv", daily_limit=2),
+            KeywordGroup(name="Research", positive_keywords=["research"]),
+            ScoringWeights(),
+        ],
+    )
+    db_session.commit()
+    titles = [
+        "Ocean research in 2024",
+        "Research with particle beams",
+        "Forest canopy research methods",
+    ]
+
+    class PagingAdapter:
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
+            offset = int(cursor or 0)
+            end = offset + limit
+            return SearchPage(
+                [
+                    PaperResult(
+                        title=title,
+                        source="arxiv",
+                        published_date=date(2024, 2, 1),
+                        doi=f"10.1234/historical-{index}",
+                    )
+                    for index, title in enumerate(titles[offset:end], offset)
+                ],
+                str(end) if end < len(titles) else None,
+            )
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", PagingAdapter())
+    request = ManualFetchRequest(
+        mode="historical_backfill",
+        date_from=datetime(2024, 1, 1, tzinfo=UTC),
+        date_to=datetime(2024, 3, 1, tzinfo=UTC),
+    )
+    first = run_manual_fetch(db_session, request)
+    second = run_manual_fetch(db_session, request)
+    assert first.status == "partial_success"
+    assert second.status == "success"
+    assert db_session.query(Paper).count() == 3
+    assert db_session.query(FetchCursor).count() == 0
+
+
+def test_page_failure_retries_from_last_committed_page(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_session.add_all(
+        [
+            SourceConfig(source_name="arxiv", display_name="arXiv", daily_limit=3),
+            KeywordGroup(name="Research", positive_keywords=["research"]),
+            ScoringWeights(),
+        ],
+    )
+    db_session.commit()
+    fail_second_page = True
+    cursors: list[str | None] = []
+
+    class PagingAdapter:
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
+            nonlocal fail_second_page
+            cursors.append(cursor)
+            if cursor == "2" and fail_second_page:
+                fail_second_page = False
+                raise RuntimeError("temporary source error")
+            offset = int(cursor or 0)
+            end = min(offset + min(limit, 2), 3)
+            return SearchPage(
+                [
+                    PaperResult(
+                        title=title,
+                        source="arxiv",
+                        published_date=date.today(),
+                    )
+                    for title in [
+                        "Research into deep sea vents",
+                        "Research on rural infrastructure",
+                        "Biomedical research imaging",
+                    ][offset:end]
+                ],
+                str(end) if end < 3 else None,
+            )
+
+    monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", PagingAdapter())
+    first = run_manual_fetch(db_session, ManualFetchRequest())
+    assert first.status == "partial_success"
+    assert first.total_new_papers == 2
+    assert db_session.query(FetchCursor).one().next_page_cursor == "2"
+
+    second = run_manual_fetch(db_session, ManualFetchRequest())
+    assert second.status == "success"
+    assert db_session.query(Paper).count() == 3
+    assert cursors == [None, "2", "2"]
+
+
 def test_historical_backfill_splits_windows_without_advancing_cursor(
     db_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -180,14 +358,16 @@ def test_historical_backfill_splits_windows_without_advancing_cursor(
     calls: list[tuple[datetime, datetime]] = []
 
     class FakeAdapter:
-        def search(self, query: str, limit: int, date_from=None, date_to=None):
+        def search_page(
+            self, query: str, limit: int, date_from=None, date_to=None, cursor=None
+        ):
             calls.append((date_from, date_to))
             titles = [
                 "Aerial manipulation with suspended payloads",
                 "Contact-rich flying robot planning",
                 "Language guided aerial object placement",
             ]
-            return [
+            return SearchPage([
                 PaperResult(
                     title=titles[len(calls) - 1],
                     abstract="aerial manipulation",
@@ -196,7 +376,7 @@ def test_historical_backfill_splits_windows_without_advancing_cursor(
                     source="arxiv",
                     source_id=f"paper-{len(calls)}",
                 ),
-            ]
+            ])
 
     monkeypatch.setitem(fetch_service.ADAPTERS, "arxiv", FakeAdapter())
 

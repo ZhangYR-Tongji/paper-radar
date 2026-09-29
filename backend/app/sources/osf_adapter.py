@@ -1,10 +1,10 @@
-from app.sources.base import BaseSourceAdapter, PaperResult
+from app.sources.base import BaseSourceAdapter, SearchPage
 
 
 class OsfAdapter(BaseSourceAdapter):
     source_name = "osf"
 
-    def search(self, query: str, limit: int, date_from=None, date_to=None) -> list[PaperResult]:
-        # OSF is seeded as disabled. Keep this adapter non-failing so users can enable it
-        # later without breaking the manual fetch flow while a richer implementation lands.
-        return []
+    def search_page(
+        self, query: str, limit: int, date_from=None, date_to=None, cursor: str | None = None
+    ) -> SearchPage:
+        raise NotImplementedError("OSF Preprints is not implemented yet; disable this source.")

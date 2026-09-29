@@ -27,6 +27,9 @@ class FetchCursor(IdMixin, TimestampMixin, Base):
     last_run_id = Column(Integer, ForeignKey("fetch_runs.id"), nullable=True)
     last_status = Column(String(32), nullable=True)
     last_error_message = Column(Text, nullable=True)
+    pending_from = Column(DateTime(timezone=True), nullable=True)
+    pending_to = Column(DateTime(timezone=True), nullable=True)
+    next_page_cursor = Column(Text, nullable=True)
 
 
 class FetchRun(IdMixin, TimestampMixin, Base):
@@ -73,5 +76,6 @@ class FetchRunItem(IdMixin, TimestampMixin, Base):
     new_paper_count = Column(Integer, default=0, nullable=False)
     duplicate_count = Column(Integer, default=0, nullable=False)
     error_message = Column(Text, nullable=True)
+    resume_cursor = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)

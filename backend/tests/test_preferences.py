@@ -172,10 +172,10 @@ def test_latest_recommendations_use_minimum_score_preference(
     db_session.add(run)
     db_session.flush()
 
-    _add_scored_paper(db_session, "Below threshold", 49.0, started_at)
-    _add_scored_paper(db_session, "At threshold", 50.0, started_at)
-    _add_scored_paper(db_session, "Above threshold", 70.0, started_at)
-    ignored = _add_scored_paper(db_session, "Ignored high score", 90.0, started_at)
+    _add_scored_paper(db_session, "Below threshold", 49.0, started_at, run.id)
+    _add_scored_paper(db_session, "At threshold", 50.0, started_at, run.id)
+    _add_scored_paper(db_session, "Above threshold", 70.0, started_at, run.id)
+    ignored = _add_scored_paper(db_session, "Ignored high score", 90.0, started_at, run.id)
     db_session.add(UserFeedback(paper_id=ignored.id, is_ignored=True))
     db_session.commit()
 
@@ -238,6 +238,7 @@ def _add_scored_paper(
     title: str,
     score: float,
     started_at: datetime,
+    run_id: int | None = None,
 ) -> Paper:
     paper = Paper(
         title=title,
@@ -247,6 +248,7 @@ def _add_scored_paper(
         source="test",
         source_id=title,
         created_at=started_at + timedelta(seconds=1),
+        first_seen_run_id=run_id,
     )
     db.add(paper)
     db.flush()

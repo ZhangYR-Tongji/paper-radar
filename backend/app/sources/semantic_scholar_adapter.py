@@ -2,14 +2,17 @@ from datetime import date, datetime
 
 import httpx
 
-from app.sources.base import BaseSourceAdapter, PaperResult, clean_text, extract_year
+from app.sources.base import BaseSourceAdapter, PaperResult, SearchPage, clean_text, extract_year
 
 
 class SemanticScholarAdapter(BaseSourceAdapter):
     source_name = "semantic_scholar"
     base_url = "https://api.semanticscholar.org/graph/v1/paper/search"
 
-    def search(self, query: str, limit: int, date_from=None, date_to=None) -> list[PaperResult]:
+    def search_page(
+        self, query: str, limit: int, date_from=None, date_to=None, cursor: str | None = None
+    ) -> SearchPage:
+        offset = int(cursor or 0)
         params: dict[str, str | int] = {
             "query": query,
             "limit": min(limit, 100),
@@ -17,14 +20,16 @@ class SemanticScholarAdapter(BaseSourceAdapter):
                 "title,abstract,authors,year,publicationDate,url,venue,"
                 "externalIds,openAccessPdf,journal"
             ),
+            "offset": offset,
         }
         if date_from or date_to:
-            params["year"] = _year_filter(date_from, date_to)
+            params["publicationDateOrYear"] = _date_filter(date_from, date_to)
 
         with httpx.Client(timeout=30.0, follow_redirects=True) as client:
             response = client.get(self.base_url, params=params)
             response.raise_for_status()
-            items = response.json().get("data", [])
+            payload = response.json()
+            items = payload.get("data", [])
 
         results: list[PaperResult] = []
         for item in items:
@@ -58,7 +63,11 @@ class SemanticScholarAdapter(BaseSourceAdapter):
                     year=item.get("year") or extract_year(published),
                 )
             )
-        return results[:limit]
+        next_offset = payload.get("next")
+        if next_offset is None and payload.get("total", 0) > offset + len(items):
+            raise ValueError("Semantic Scholar capped this search; narrow the date range.")
+        next_cursor = str(next_offset) if next_offset is not None and items else None
+        return SearchPage(results[:limit], next_cursor)
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -67,10 +76,10 @@ def _parse_date(value: str | None) -> date | None:
     return date.fromisoformat(value)
 
 
-def _year_filter(date_from=None, date_to=None) -> str:
-    start = _as_date(date_from).year if date_from else ""
-    end = _as_date(date_to).year if date_to else ""
-    return f"{start}-{end}"
+def _date_filter(date_from=None, date_to=None) -> str:
+    start = _as_date(date_from).isoformat() if date_from else ""
+    end = _as_date(date_to).isoformat() if date_to else ""
+    return f"{start}:{end}"
 
 
 def _within_range(value: date | None, date_from=None, date_to=None) -> bool:

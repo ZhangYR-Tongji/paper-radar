@@ -15,6 +15,7 @@ class Paper(IdMixin, TimestampMixin, Base):
     updated_date = Column(Date, nullable=True)
     source = Column(String(64), index=True, nullable=False)
     source_id = Column(String(256), index=True, nullable=True)
+    first_seen_run_id = Column(Integer, ForeignKey("fetch_runs.id"), index=True, nullable=True)
     doi = Column(String(256), index=True, nullable=True)
     arxiv_id = Column(String(128), index=True, nullable=True)
     url = Column(Text, nullable=True)

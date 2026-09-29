@@ -2,14 +2,16 @@ from datetime import date, datetime
 
 import httpx
 
-from app.sources.base import BaseSourceAdapter, PaperResult, clean_text, extract_year
+from app.sources.base import BaseSourceAdapter, PaperResult, SearchPage, clean_text, extract_year
 
 
 class OpenAlexAdapter(BaseSourceAdapter):
     source_name = "openalex"
     base_url = "https://api.openalex.org/works"
 
-    def search(self, query: str, limit: int, date_from=None, date_to=None) -> list[PaperResult]:
+    def search_page(
+        self, query: str, limit: int, date_from=None, date_to=None, cursor: str | None = None
+    ) -> SearchPage:
         filters = []
         if date_from:
             filters.append(f"from_publication_date:{_date_string(date_from)}")
@@ -18,8 +20,9 @@ class OpenAlexAdapter(BaseSourceAdapter):
 
         params: dict[str, str | int] = {
             "search": query,
-            "per-page": min(limit, 200),
+            "per-page": min(limit, 100),
             "sort": "publication_date:desc",
+            "cursor": cursor or "*",
         }
         if filters:
             params["filter"] = ",".join(filters)
@@ -62,7 +65,8 @@ class OpenAlexAdapter(BaseSourceAdapter):
                     year=item.get("publication_year") or extract_year(published),
                 )
             )
-        return results[:limit]
+        next_cursor = (payload.get("meta") or {}).get("next_cursor") if results else None
+        return SearchPage(results[:limit], next_cursor)
 
 
 def _abstract_from_inverted_index(index: dict[str, list[int]] | None) -> str:

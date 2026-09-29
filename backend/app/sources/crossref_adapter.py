@@ -2,14 +2,16 @@ from datetime import date, datetime
 
 import httpx
 
-from app.sources.base import BaseSourceAdapter, PaperResult, clean_text, extract_year
+from app.sources.base import BaseSourceAdapter, PaperResult, SearchPage, clean_text, extract_year
 
 
 class CrossrefAdapter(BaseSourceAdapter):
     source_name = "crossref"
     base_url = "https://api.crossref.org/works"
 
-    def search(self, query: str, limit: int, date_from=None, date_to=None) -> list[PaperResult]:
+    def search_page(
+        self, query: str, limit: int, date_from=None, date_to=None, cursor: str | None = None
+    ) -> SearchPage:
         filters = []
         if date_from:
             filters.append(f"from-pub-date:{_date_string(date_from)}")
@@ -20,6 +22,7 @@ class CrossrefAdapter(BaseSourceAdapter):
             "rows": min(limit, 100),
             "sort": "published",
             "order": "desc",
+            "cursor": cursor or "*",
         }
         if filters:
             params["filter"] = ",".join(filters)
@@ -27,7 +30,8 @@ class CrossrefAdapter(BaseSourceAdapter):
         with httpx.Client(timeout=30.0, follow_redirects=True) as client:
             response = client.get(self.base_url, params=params)
             response.raise_for_status()
-            items = response.json().get("message", {}).get("items", [])
+            message = response.json().get("message", {})
+            items = message.get("items", [])
 
         results: list[PaperResult] = []
         for item in items:
@@ -69,7 +73,8 @@ class CrossrefAdapter(BaseSourceAdapter):
                     year=extract_year(published),
                 )
             )
-        return results[:limit]
+        next_cursor = message.get("next-cursor") if len(items) >= params["rows"] else None
+        return SearchPage(results[:limit], next_cursor)
 
 
 def _date_from_parts(value: dict | None) -> date | None:
