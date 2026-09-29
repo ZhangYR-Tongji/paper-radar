@@ -18,6 +18,7 @@ from app.schemas.settings import (
     UserPreferencesRead,
     UserPreferencesUpdate,
 )
+from app.services.scoring import rescore_all_papers
 
 router = APIRouter()
 
@@ -36,8 +37,11 @@ def update_source(
     source = db.get(SourceConfig, source_id)
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+    was_ranked = source.participates_in_ranking
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(source, field, value)
+    if source.participates_in_ranking != was_ranked:
+        rescore_all_papers(db)
     db.commit()
     db.refresh(source)
     return source
@@ -59,6 +63,7 @@ def create_keyword_group(
 ) -> KeywordGroup:
     group = KeywordGroup(**payload.model_dump())
     db.add(group)
+    rescore_all_papers(db)
     db.commit()
     db.refresh(group)
     return group
@@ -75,6 +80,7 @@ def update_keyword_group(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword group not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(group, field, value)
+    rescore_all_papers(db)
     db.commit()
     db.refresh(group)
     return group
@@ -87,6 +93,7 @@ def delete_keyword_group(group_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword group not found")
     db.query(FetchCursor).filter(FetchCursor.keyword_group_id == group_id).delete()
     db.delete(group)
+    rescore_all_papers(db)
     db.commit()
 
 
@@ -94,6 +101,7 @@ def delete_keyword_group(group_id: int, db: Session = Depends(get_db)) -> None:
 def clear_keyword_groups(db: Session = Depends(get_db)) -> list[KeywordGroup]:
     db.query(FetchCursor).delete()
     db.query(KeywordGroup).delete()
+    rescore_all_papers(db)
     db.commit()
     return db.query(KeywordGroup).order_by(KeywordGroup.id).all()
 
@@ -120,6 +128,7 @@ def update_scoring_weights(
         db.add(weights)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(weights, field, value)
+    rescore_all_papers(db)
     db.commit()
     db.refresh(weights)
     return weights

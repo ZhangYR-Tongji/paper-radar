@@ -111,7 +111,7 @@ def test_database_failure_rolls_back_item_and_allows_retry(
 
     original_score_paper = fetch_service.score_paper
 
-    def fail_scoring(db: Session, paper: Paper) -> None:
+    def fail_scoring(db: Session, paper: Paper, *args, **kwargs) -> None:
         db.add(PaperFeature(paper_id=None))
         db.flush()
 

@@ -11,7 +11,7 @@ from app.models.paper import Paper
 from app.models.source_config import SourceConfig
 from app.schemas.fetch import ManualFetchRequest
 from app.services.deduplication import find_duplicate_paper, normalize_title
-from app.services.scoring import score_paper
+from app.services.scoring import ScoringContext, load_scoring_context, score_paper
 from app.sources.arxiv_adapter import ArxivAdapter
 from app.sources.base import PaperResult
 from app.sources.crossref_adapter import CrossrefAdapter
@@ -125,6 +125,7 @@ def _execute_fetch_items(
 
     error_messages: list[str] = []
     fetch_from_values: list[datetime] = []
+    scoring_context = load_scoring_context(db)
 
     for source in sources:
         adapter = ADAPTERS.get(source.source_name)
@@ -209,7 +210,7 @@ def _execute_fetch_items(
                             for result in page.papers
                             if _result_in_range(result, fetch_from, window_fetch_to)
                         ]
-                        counts = _store_results(db, filtered_results, run.id)
+                        counts = _store_results(db, filtered_results, run.id, scoring_context)
                         item.raw_result_count += len(page.papers)
                         item.new_paper_count += counts["new"]
                         item.duplicate_count += counts["duplicate"]
@@ -414,7 +415,10 @@ def _split_backfill_windows(
 
 
 def _store_results(
-    db: Session, filtered_results: list[PaperResult], run_id: int
+    db: Session,
+    filtered_results: list[PaperResult],
+    run_id: int,
+    scoring_context: ScoringContext,
 ) -> dict[str, int]:
     counts = {
         "new": 0,
@@ -434,7 +438,7 @@ def _store_results(
         paper.first_seen_run_id = run_id
         db.add(paper)
         db.flush()
-        feature = score_paper(db, paper)
+        feature = score_paper(db, paper, scoring_context, is_new=True)
         counts["new"] += 1
         counts["scored"] += 1
         if feature.classification == "Highly Relevant":

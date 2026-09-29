@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -6,6 +7,32 @@ from app.models.feedback import UserPreferences
 from app.models.keyword_group import KeywordGroup
 from app.models.paper import Paper, PaperFeature
 from app.models.scoring import ScoringWeights
+from app.models.source_config import SourceConfig
+
+
+@dataclass(frozen=True)
+class ScoringContext:
+    groups: tuple[KeywordGroup, ...]
+    weights: ScoringWeights
+    preferences: UserPreferences | None
+    ranked_sources: dict[str, bool]
+
+
+@dataclass(frozen=True)
+class ScoreBreakdown:
+    matched_groups: list[str]
+    matched_positive: list[str]
+    matched_negative: list[str]
+    topic_tags: list[str]
+    method_tags: list[str]
+    venue_score: float
+    topic_score: float
+    method_score: float
+    freshness_score: float
+    user_preference_score: float
+    negative_filter_penalty: float
+    final_score: float
+    classification: str
 
 
 def classify_score(final_score: float) -> str:
@@ -18,10 +45,21 @@ def classify_score(final_score: float) -> str:
     return "Filtered"
 
 
-def score_paper(db: Session, paper: Paper) -> PaperFeature:
-    groups = db.query(KeywordGroup).filter(KeywordGroup.is_enabled.is_(True)).all()
+def load_scoring_context(db: Session) -> ScoringContext:
+    groups = tuple(db.query(KeywordGroup).filter(KeywordGroup.is_enabled.is_(True)).all())
     weights = db.query(ScoringWeights).first() or ScoringWeights()
     preferences = db.query(UserPreferences).first()
+    ranked_sources = {
+        source.source_name: source.participates_in_ranking
+        for source in db.query(SourceConfig).all()
+    }
+    return ScoringContext(groups, weights, preferences, ranked_sources)
+
+
+def calculate_paper_score(paper: Paper, context: ScoringContext) -> ScoreBreakdown:
+    groups = context.groups
+    weights = context.weights
+    preferences = context.preferences
 
     text = f"{paper.title} {paper.abstract}".casefold()
     matched_groups: list[str] = []
@@ -81,27 +119,78 @@ def score_paper(db: Session, paper: Paper) -> PaperFeature:
         - negative_filter_penalty * weights.negative_filter_weight
     )
     final_score = max(0.0, min(100.0, final_score))
+    if not context.ranked_sources.get(paper.source, True):
+        final_score = 0.0
 
-    feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper.id).first()
-    if not feature:
+    return ScoreBreakdown(
+        matched_groups=sorted(set(matched_groups)),
+        matched_positive=sorted(set(matched_positive)),
+        matched_negative=sorted(set(matched_negative)),
+        topic_tags=sorted(set(topic_tags)),
+        method_tags=method_tags,
+        venue_score=venue_score,
+        topic_score=topic_score,
+        method_score=method_score,
+        freshness_score=freshness_score,
+        user_preference_score=user_preference_score,
+        negative_filter_penalty=negative_filter_penalty,
+        final_score=round(final_score, 2),
+        classification=classify_score(final_score),
+    )
+
+
+def score_paper(
+    db: Session,
+    paper: Paper,
+    context: ScoringContext | None = None,
+    *,
+    is_new: bool = False,
+) -> PaperFeature:
+    loaded_context = context or load_scoring_context(db)
+    feature = (
+        None
+        if is_new
+        else db.query(PaperFeature).filter(PaperFeature.paper_id == paper.id).first()
+    )
+    if feature is None:
         feature = PaperFeature(paper_id=paper.id)
         db.add(feature)
-
-    feature.matched_keyword_groups = sorted(set(matched_groups))
-    feature.matched_positive_keywords = sorted(set(matched_positive))
-    feature.matched_negative_keywords = sorted(set(matched_negative))
-    feature.topic_tags = sorted(set(topic_tags))
-    feature.method_tags = method_tags
-    feature.venue_score = venue_score
-    feature.topic_score = topic_score
-    feature.method_score = method_score
-    feature.freshness_score = freshness_score
-    feature.user_preference_score = user_preference_score
-    feature.negative_filter_penalty = negative_filter_penalty
-    feature.final_score = round(final_score, 2)
-    feature.classification = classify_score(final_score)
-    db.flush()
+    _apply_score(feature, calculate_paper_score(paper, loaded_context))
+    if context is None:
+        db.flush()
     return feature
+
+
+def rescore_all_papers(db: Session) -> None:
+    db.flush()
+    context = load_scoring_context(db)
+    rows = (
+        db.query(Paper, PaperFeature)
+        .outerjoin(PaperFeature, PaperFeature.paper_id == Paper.id)
+        .all()
+    )
+    for paper, feature in rows:
+        if feature is None:
+            feature = PaperFeature(paper_id=paper.id)
+            db.add(feature)
+        _apply_score(feature, calculate_paper_score(paper, context))
+    db.flush()
+
+
+def _apply_score(feature: PaperFeature, score: ScoreBreakdown) -> None:
+    feature.matched_keyword_groups = score.matched_groups
+    feature.matched_positive_keywords = score.matched_positive
+    feature.matched_negative_keywords = score.matched_negative
+    feature.topic_tags = score.topic_tags
+    feature.method_tags = score.method_tags
+    feature.venue_score = score.venue_score
+    feature.topic_score = score.topic_score
+    feature.method_score = score.method_score
+    feature.freshness_score = score.freshness_score
+    feature.user_preference_score = score.user_preference_score
+    feature.negative_filter_penalty = score.negative_filter_penalty
+    feature.final_score = score.final_score
+    feature.classification = score.classification
 
 
 def _contains(text: str, keyword: str) -> bool:

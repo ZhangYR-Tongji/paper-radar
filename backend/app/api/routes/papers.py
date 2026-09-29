@@ -12,7 +12,7 @@ from app.schemas.feedback import FeedbackUpsert
 from app.services.citation_export import export_filename, export_media_type, export_papers
 from app.services.paper_views import latest_recommendations, list_paper_dicts, paper_to_dict
 from app.services.preferences import update_user_preferences_after_feedback
-from app.services.scoring import score_paper
+from app.services.scoring import rescore_all_papers
 
 router = APIRouter()
 ExportFormat = Literal["ris", "bibtex"]
@@ -143,8 +143,7 @@ def _upsert_feedback(db: Session, paper_id: int, payload: FeedbackUpsert) -> dic
         previous_rating=previous_rating,
     )
     if preferences_changed:
-        for candidate in db.query(Paper).all():
-            score_paper(db, candidate)
+        rescore_all_papers(db)
     db.commit()
     db.refresh(feedback)
     feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper_id).first()
