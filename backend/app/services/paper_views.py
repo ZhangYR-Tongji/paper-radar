@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 
+from sqlalchemy import String, case, cast, or_
 from sqlalchemy.orm import Session
 
 from app.models.feedback import UserFeedback, UserPreferences
@@ -67,6 +68,11 @@ def list_paper_dicts(
     date_to: date | None = None,
     sort_by: str = "score",
     run: FetchRun | None = None,
+    is_ignored: bool | None = None,
+    in_library: bool = False,
+    search_query: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict[str, object]]:
     query = (
         db.query(Paper, PaperFeature, UserFeedback)
@@ -83,33 +89,93 @@ def list_paper_dicts(
         query = query.filter(PaperFeature.final_score >= min_score)
     if classification:
         query = query.filter(PaperFeature.classification == classification)
+    if search_query:
+        escaped = (
+            search_query.strip()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped}%"
+        query = query.filter(
+            or_(
+                Paper.title.ilike(pattern, escape="\\"),
+                Paper.abstract.ilike(pattern, escape="\\"),
+                cast(Paper.authors, String).ilike(pattern, escape="\\"),
+                cast(PaperFeature.matched_keyword_groups, String).ilike(pattern, escape="\\"),
+                cast(PaperFeature.matched_positive_keywords, String).ilike(
+                    pattern, escape="\\"
+                ),
+            )
+        )
     if is_saved is not None:
-        query = query.filter(UserFeedback.is_saved.is_(is_saved))
+        query = query.filter(
+            or_(UserFeedback.paper_id.is_(None), UserFeedback.is_saved.is_(False))
+            if not is_saved
+            else UserFeedback.is_saved.is_(True)
+        )
     if is_read is not None:
-        query = query.filter(UserFeedback.is_read.is_(is_read))
+        query = query.filter(
+            or_(UserFeedback.paper_id.is_(None), UserFeedback.is_read.is_(False))
+            if not is_read
+            else UserFeedback.is_read.is_(True)
+        )
     if is_core is not None:
-        query = query.filter(UserFeedback.is_core.is_(is_core))
+        query = query.filter(
+            or_(UserFeedback.paper_id.is_(None), UserFeedback.is_core.is_(False))
+            if not is_core
+            else UserFeedback.is_core.is_(True)
+        )
+    if is_ignored is not None:
+        query = query.filter(
+            or_(UserFeedback.paper_id.is_(None), UserFeedback.is_ignored.is_(False))
+            if not is_ignored
+            else UserFeedback.is_ignored.is_(True)
+        )
+    if in_library:
+        query = query.filter(
+            or_(
+                UserFeedback.is_saved.is_(True),
+                UserFeedback.is_core.is_(True),
+                UserFeedback.is_read.is_(True),
+            )
+        )
     if run:
         query = query.filter(Paper.first_seen_run_id == run.id)
 
-    rows = query.all()
-    papers = [paper_to_dict(paper, feature, feedback) for paper, feature, feedback in rows]
-    if keyword_group:
-        papers = [
-            paper
-            for paper in papers
-            if keyword_group in paper.get("matched_keyword_groups", [])
-        ]
-    if sort_by == "date":
-        papers.sort(key=lambda item: item.get("published_date") or "", reverse=True)
+    if sort_by == "library":
+        priority = case(
+            (UserFeedback.is_core.is_(True), 0),
+            (UserFeedback.is_saved.is_(True), 1),
+            (UserFeedback.is_read.is_(True), 2),
+            else_=3,
+        )
+        query = query.order_by(priority, PaperFeature.final_score.desc(), Paper.id.desc())
+    elif sort_by == "date":
+        query = query.order_by(Paper.published_date.desc(), Paper.id.desc())
     elif sort_by == "created_at":
-        papers.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        query = query.order_by(Paper.created_at.desc(), Paper.id.desc())
     else:
-        papers.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+        query = query.order_by(PaperFeature.final_score.desc(), Paper.id.desc())
+
+    if keyword_group:
+        rows = [
+            row
+            for row in query.all()
+            if row[1] and keyword_group in (row[1].matched_keyword_groups or [])
+        ]
+        rows = rows[offset : offset + limit if limit is not None else None]
+    else:
+        if limit is not None:
+            query = query.limit(limit)
+        rows = query.offset(offset).all()
+    papers = [paper_to_dict(paper, feature, feedback) for paper, feature, feedback in rows]
     return papers
 
 
-def latest_recommendations(db: Session) -> dict[str, object]:
+def latest_recommendations(
+    db: Session, limit: int | None = None, offset: int = 0
+) -> dict[str, object]:
     run = db.query(FetchRun).order_by(FetchRun.started_at.desc(), FetchRun.id.desc()).first()
     min_score = _recommendation_min_score(db)
     if not run:
@@ -124,16 +190,26 @@ def latest_recommendations(db: Session) -> dict[str, object]:
         min_score=min_score,
         sort_by="score",
         run=run,
+        is_ignored=False,
+        limit=limit,
+        offset=offset,
     )
-    visible = [paper for paper in papers if not paper["is_ignored"]]
     return {
-        "latest_fetch_run": fetch_run_to_dict(db, run) if run else None,
+        "latest_fetch_run": fetch_run_to_dict(db, run, include_items=False, include_papers=False),
         "recommendation_min_score": min_score,
-        "papers": visible,
+        "papers": papers,
     }
 
 
-def fetch_run_to_dict(db: Session, run: FetchRun | None) -> dict[str, object] | None:
+def fetch_run_to_dict(
+    db: Session,
+    run: FetchRun | None,
+    *,
+    include_items: bool = True,
+    include_papers: bool = True,
+    paper_limit: int | None = None,
+    paper_offset: int = 0,
+) -> dict[str, object] | None:
     if not run:
         return None
     items = (
@@ -141,6 +217,8 @@ def fetch_run_to_dict(db: Session, run: FetchRun | None) -> dict[str, object] | 
         .filter(FetchRunItem.fetch_run_id == run.id)
         .order_by(FetchRunItem.id)
         .all()
+        if include_items
+        else []
     )
     return {
         "id": run.id,
@@ -162,7 +240,13 @@ def fetch_run_to_dict(db: Session, run: FetchRun | None) -> dict[str, object] | 
         "error_count": run.error_count,
         "error_summary": run.error_summary,
         "items": [fetch_run_item_to_dict(item) for item in items],
-        "papers": list_paper_dicts(db, run=run, sort_by="score"),
+        "papers": (
+            list_paper_dicts(
+                db, run=run, sort_by="score", limit=paper_limit, offset=paper_offset
+            )
+            if include_papers
+            else []
+        ),
     }
 
 

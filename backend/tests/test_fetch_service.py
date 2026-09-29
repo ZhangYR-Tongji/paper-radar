@@ -428,6 +428,7 @@ def test_clear_fetch_runs_deletes_fetch_records_only(db_session: Session) -> Non
     )
     db_session.add(run)
     db_session.flush()
+    paper.first_seen_run_id = run.id
     db_session.add_all(
         [
             FetchRunItem(
@@ -459,6 +460,7 @@ def test_clear_fetch_runs_deletes_fetch_records_only(db_session: Session) -> Non
     assert db_session.query(FetchCursor).count() == 0
     assert db_session.query(KeywordGroup).count() == 1
     assert db_session.query(Paper).count() == 1
+    assert db_session.query(Paper).one().first_seen_run_id is None
     db_session.refresh(source)
     assert source.last_success_at is None
     assert source.last_error_at is None

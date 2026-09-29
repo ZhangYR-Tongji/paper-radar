@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.fetch import FetchCursor, FetchRun, FetchRunItem
+from app.models.paper import Paper
 from app.models.source_config import SourceConfig
 from app.schemas.fetch import FetchStatusRead, ManualFetchRequest
 from app.services.fetch_service import run_manual_fetch
@@ -17,7 +18,7 @@ def start_manual_fetch(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     run = run_manual_fetch(db, payload)
-    return fetch_run_to_dict(db, run) or {}
+    return fetch_run_to_dict(db, run, include_items=False, include_papers=False) or {}
 
 
 @router.get("/status", response_model=FetchStatusRead)
@@ -33,9 +34,22 @@ def get_fetch_status(db: Session = Depends(get_db)) -> FetchStatusRead:
 
 
 @router.get("/runs")
-def list_fetch_runs(db: Session = Depends(get_db)) -> list[dict[str, object]]:
-    runs = db.query(FetchRun).order_by(FetchRun.started_at.desc(), FetchRun.id.desc()).all()
-    return [fetch_run_to_dict(db, run) or {} for run in runs]
+def list_fetch_runs(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    runs = (
+        db.query(FetchRun)
+        .order_by(FetchRun.started_at.desc(), FetchRun.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+    return [
+        fetch_run_to_dict(db, run, include_items=False, include_papers=False) or {}
+        for run in runs
+    ]
 
 
 @router.post("/runs/clear")
@@ -47,6 +61,9 @@ def clear_fetch_runs(db: Session = Depends(get_db)) -> dict[str, int]:
             detail=f"Fetch run {running.id} is still running.",
         )
 
+    db.query(Paper).filter(Paper.first_seen_run_id.is_not(None)).update(
+        {Paper.first_seen_run_id: None}, synchronize_session=False
+    )
     deleted_items = db.query(FetchRunItem).delete()
     deleted_cursors = db.query(FetchCursor).delete()
     deleted_runs = db.query(FetchRun).delete()
@@ -67,8 +84,13 @@ def clear_fetch_runs(db: Session = Depends(get_db)) -> dict[str, int]:
 
 
 @router.get("/runs/{run_id}")
-def get_fetch_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
+def get_fetch_run(
+    run_id: int,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
     run = db.get(FetchRun, run_id)
     if not run:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fetch run not found")
-    return fetch_run_to_dict(db, run) or {}
+    return fetch_run_to_dict(db, run, paper_limit=limit, paper_offset=offset) or {}

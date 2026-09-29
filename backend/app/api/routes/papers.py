@@ -30,6 +30,10 @@ def list_papers(
     date_from: date | None = None,
     date_to: date | None = None,
     sort_by: str = "score",
+    q: str | None = None,
+    is_ignored: bool | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
     return list_paper_dicts(
@@ -44,27 +48,31 @@ def list_papers(
         date_from=date_from,
         date_to=date_to,
         sort_by=sort_by,
+        search_query=q,
+        is_ignored=is_ignored,
+        limit=limit,
+        offset=offset,
     )
 
 
 @router.get("/latest")
-def latest_papers(db: Session = Depends(get_db)) -> dict[str, object]:
-    return latest_recommendations(db)
+def latest_papers(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    return latest_recommendations(db, limit=limit, offset=offset)
 
 
 @router.get("/library")
-def library_papers(db: Session = Depends(get_db)) -> list[dict[str, object]]:
-    saved = list_paper_dicts(db, is_saved=True, sort_by="score")
-    core = list_paper_dicts(db, is_core=True, sort_by="score")
-    read = list_paper_dicts(db, is_read=True, sort_by="date")
-    seen: set[int] = set()
-    merged = []
-    for paper in [*core, *saved, *read]:
-        paper_id = int(paper["id"])
-        if paper_id not in seen:
-            seen.add(paper_id)
-            merged.append(paper)
-    return merged
+def library_papers(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    return list_paper_dicts(
+        db, in_library=True, sort_by="library", limit=limit, offset=offset
+    )
 
 
 @router.get("/export/library")
