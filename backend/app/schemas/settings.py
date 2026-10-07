@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SourceConfigRead(BaseModel):
@@ -78,12 +78,21 @@ class ScoringWeightsRead(BaseModel):
 
 
 class ScoringWeightsUpdate(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     topic_weight: float | None = Field(default=None, ge=0)
     method_weight: float | None = Field(default=None, ge=0)
     venue_weight: float | None = Field(default=None, ge=0)
     freshness_weight: float | None = Field(default=None, ge=0)
     user_preference_weight: float | None = Field(default=None, ge=0)
     negative_filter_weight: float | None = Field(default=None, ge=0)
+
+    @field_validator("*")
+    @classmethod
+    def reject_explicit_null(cls, value: float | None) -> float:
+        if value is None:
+            raise ValueError("A supplied scoring weight must be a finite non-negative number.")
+        return value
 
 
 class UserPreferencesRead(BaseModel):

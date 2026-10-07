@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 from app.models.feedback import UserPreferences
 from app.models.keyword_group import KeywordGroup
 from app.models.paper import Paper, PaperFeature
-from app.models.scoring import DEFAULT_SCORING_WEIGHTS, ScoringWeights
+from app.models.scoring import (
+    DEFAULT_SCORING_WEIGHTS,
+    LEGACY_SCORING_WEIGHTS,
+    SCORING_VERSION,
+    ScoringWeights,
+)
 from app.models.source_config import SourceConfig
 from app.services.keyword_matching import contains_keyword, normalize_text, unique_keywords
 
@@ -154,9 +159,9 @@ def _group_evidence(group: KeywordGroup, title: str, abstract: str) -> GroupEvid
     required = unique_keywords(group.required_keywords or [])
     if not all(matches(keyword) for keyword in required):
         return None
-    anchors = unique_keywords([*(group.positive_keywords or []), *required])
+    anchors = unique_keywords(group.positive_keywords or []) or required
     primary_hits = [keyword for keyword in anchors if matches(keyword)]
-    anchor_keys = {normalize_text(keyword) for keyword in anchors}
+    anchor_keys = {normalize_text(keyword) for keyword in [*anchors, *required]}
     optional_hits = [
         keyword
         for keyword in unique_keywords(group.optional_keywords or [])
@@ -237,7 +242,21 @@ def rescore_all_papers(db: Session) -> None:
             feature = PaperFeature(paper_id=paper.id)
             db.add(feature)
         _apply_score(feature, calculate_paper_score(paper, context))
+    context.weights.algorithm_version = SCORING_VERSION
+    db.add(context.weights)
     db.flush()
+
+
+def upgrade_scoring(db: Session) -> None:
+    """Upgrade defaults and cached scores together, preserving custom weight sets."""
+    weights = db.query(ScoringWeights).first()
+    if not weights or weights.algorithm_version >= SCORING_VERSION:
+        return
+    if all(getattr(weights, name) == value for name, value in LEGACY_SCORING_WEIGHTS.items()):
+        for name, value in DEFAULT_SCORING_WEIGHTS.items():
+            setattr(weights, name, value)
+    rescore_all_papers(db)
+    db.commit()
 
 
 def _apply_score(feature: PaperFeature, score: ScoreBreakdown) -> None:

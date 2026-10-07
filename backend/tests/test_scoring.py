@@ -142,6 +142,16 @@ def test_required_only_group_is_valid_but_empty_group_is_not():
     assert score(groups=[group(positive_keywords=["", "   "])]).final_score == 0
 
 
+def test_required_term_cannot_replace_unmatched_positive_terms():
+    configured = group(
+        positive_keywords=["aerial manipulation"],
+        required_keywords=["robot"],
+    )
+    assert (
+        score(paper(title="A robot for surgery", abstract=""), groups=[configured]).final_score == 0
+    )
+
+
 def test_negative_terms_are_counted_once_and_remain_local_to_each_direction():
     item = paper(abstract="A power-cable inspection experiment in remote sensing.")
     clean = score(item)

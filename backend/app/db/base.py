@@ -15,6 +15,7 @@ from app.models import (
     UserPreferences,
 )
 from app.seed import seed_defaults
+from app.services.scoring import upgrade_scoring
 
 _MODEL_IMPORTS = (
     FetchCursor,
@@ -34,9 +35,11 @@ def init_db(db: Session) -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_user_preferences_schema()
     _ensure_fetch_schema()
+    _ensure_scoring_schema()
     seed_defaults(db)
     recover_interrupted_fetch_runs(db)
     _backfill_first_seen_run(db)
+    upgrade_scoring(db)
     for index in (*FetchRun.__table__.indexes, *Paper.__table__.indexes):
         index.create(bind=engine, checkfirst=True)
 
@@ -75,6 +78,21 @@ def _ensure_user_preferences_schema() -> None:
         )
 
 
+def _ensure_scoring_schema() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("scoring_weights"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("scoring_weights")}
+    if "algorithm_version" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE scoring_weights "
+                    "ADD COLUMN algorithm_version INTEGER NOT NULL DEFAULT 1"
+                )
+            )
+
+
 def _ensure_fetch_schema() -> None:
     tables = {
         "fetch_cursors": {
@@ -97,8 +115,12 @@ def _ensure_fetch_schema() -> None:
 
 
 def _backfill_first_seen_run(db: Session) -> None:
-    runs = db.query(FetchRun).filter(FetchRun.finished_at.is_not(None)).order_by(
-        FetchRun.started_at,
+    runs = (
+        db.query(FetchRun)
+        .filter(FetchRun.finished_at.is_not(None))
+        .order_by(
+            FetchRun.started_at,
+        )
     )
     for run in runs:
         db.query(Paper).filter(

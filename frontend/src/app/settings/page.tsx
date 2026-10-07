@@ -230,6 +230,9 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+        <p className="mb-4 text-sm leading-6 text-zinc-500">
+          每组代表一个研究方向，论文按最匹配的方向评分。正向词可以填写多种表达，无需全部出现；必须词需全部出现，可选词只作补充，负向词只降低本组得分。
+        </p>
         {groups.length ? (
           <div className="grid gap-4 lg:grid-cols-3">
             {groups.map((group) => (
@@ -298,6 +301,9 @@ export default function SettingsPage() {
 
       <section>
         <h2 className="mb-3 text-base font-semibold text-zinc-950">评分权重</h2>
+        <p className="mb-4 text-sm leading-6 text-zinc-500">
+          主题、方法、来源和新鲜度按比例计算基础分。用户偏好和负向过滤分别控制加减分幅度，0.1 对应最多 10 分；最终得分受主题匹配强度限制。来源暂按中性处理，默认权重为 0。
+        </p>
         <div className="grid gap-3 rounded-md border border-zinc-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-6">
           {[
             ["topic_weight", "主题"],
@@ -313,6 +319,7 @@ export default function SettingsPage() {
                 className="mt-1 h-9 w-full rounded-md border border-zinc-200 px-2"
                 value={weights[key] ?? 0}
                 type="number"
+                min="0"
                 step="0.01"
                 onChange={(event) =>
                   setWeights((current) => ({
