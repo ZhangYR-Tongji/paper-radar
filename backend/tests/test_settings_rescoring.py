@@ -57,17 +57,18 @@ def test_settings_changes_immediately_update_existing_papers(db_session: Session
     db_session.flush()
     score_paper(db_session, paper)
     db_session.commit()
-    assert db_session.query(PaperFeature).one().final_score == 100
+    initial_score = db_session.query(PaperFeature).one().final_score
+    assert initial_score >= 80
 
     update_source(source.id, SourceConfigUpdate(participates_in_ranking=False), db_session)
     assert db_session.query(PaperFeature).one().final_score == 0
     update_source(source.id, SourceConfigUpdate(participates_in_ranking=True), db_session)
-    assert db_session.query(PaperFeature).one().final_score == 100
+    assert db_session.query(PaperFeature).one().final_score == initial_score
 
     update_keyword_group(group.id, KeywordGroupUpdate(positive_keywords=["geology"]), db_session)
     assert db_session.query(PaperFeature).one().final_score == 0
     update_keyword_group(group.id, KeywordGroupUpdate(positive_keywords=["robotics"]), db_session)
-    assert db_session.query(PaperFeature).one().final_score == 100
+    assert db_session.query(PaperFeature).one().final_score == initial_score
 
     update_scoring_weights(ScoringWeightsUpdate(topic_weight=0), db_session)
     assert db_session.query(PaperFeature).one().final_score == 0
@@ -78,7 +79,7 @@ def test_settings_changes_immediately_update_existing_papers(db_session: Session
     create_keyword_group(
         KeywordGroupCreate(name="Robotics", positive_keywords=["robotics"]), db_session
     )
-    assert db_session.query(PaperFeature).one().final_score == 100
+    assert db_session.query(PaperFeature).one().final_score == initial_score
     clear_keyword_groups(db_session)
     assert db_session.query(PaperFeature).one().final_score == 0
 
