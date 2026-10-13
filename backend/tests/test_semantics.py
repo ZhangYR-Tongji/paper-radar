@@ -13,7 +13,7 @@ from app.services import semantic_index
 from app.services.scoring import calculate_paper_score, load_scoring_context
 from app.services.semantic_index import prepare_semantic_context
 from app.services.semantic_runtime import MODEL_DIMENSION, SemanticModelError
-from app.services.semantic_types import group_text, paper_text, text_hash
+from app.services.semantic_types import group_anchor_text, group_text, paper_text, text_hash
 
 
 def unit_vector(index: int = 0) -> list[float]:
@@ -28,12 +28,13 @@ class FakeRuntime:
         self.passages: list[list[str]] = []
         self.fail_on: str | None = None
         self.passage_axis = 0
+        self.query_axes: dict[str, int] = {}
 
     def encode_queries(self, texts: list[str]) -> list[list[float]]:
         self.queries.append(list(texts))
         if self.fail_on == "query":
             raise SemanticModelError("The local model is unavailable.")
-        return [unit_vector() for _ in texts]
+        return [unit_vector(self.query_axes.get(text, 0)) for text in texts]
 
     def encode_passages(self, texts: list[str]) -> list[list[float]]:
         self.passages.append(list(texts))
@@ -108,7 +109,9 @@ def test_semantic_only_match_enters_recommendations_without_fabricated_keyword_h
     assert result.semantic_details["group"] == "柔性机器人"
     assert result.semantic_details["similarity"] == 1
     assert result.semantic_details["status"] == "applied"
-    assert runtime.queries == [[group_text(context.groups[0])]]
+    assert runtime.queries == [[
+        group_text(context.groups[0]), group_anchor_text(context.groups[0]),
+    ]]
     assert runtime.passages == [[paper_text(item)]]
 
 
@@ -236,7 +239,7 @@ def test_content_cache_reuses_vectors_across_sessions_without_encoding(
     items = [paper(), paper(1)]
     first = prepare_semantic_context(db_session, context, items)
     db_session.commit()
-    assert db_session.query(SemanticEmbedding).count() == 3
+    assert db_session.query(SemanticEmbedding).count() == 4
 
     with Session(bind=db_session.get_bind()) as reopened:
         second = prepare_semantic_context(reopened, load_scoring_context(reopened), items)
@@ -296,7 +299,7 @@ def test_model_revision_key_change_invalidates_query_and_passage_vectors(
     assert second.semantic.index_key != first.semantic.index_key
     assert len(runtime.queries) == 2
     assert len(runtime.passages) == 2
-    assert db_session.query(SemanticEmbedding).count() == 6
+    assert db_session.query(SemanticEmbedding).count() == 8
 
 
 def test_semantic_index_batches_passages_instead_of_encoding_each_paper(
@@ -307,7 +310,7 @@ def test_semantic_index_batches_passages_instead_of_encoding_each_paper(
 
     prepared = prepare_semantic_context(db_session, context, items)
 
-    assert [len(batch) for batch in runtime.queries] == [1]
+    assert [len(batch) for batch in runtime.queries] == [2]
     assert [len(batch) for batch in runtime.passages] == [16, 16, 5]
     assert len(prepared.semantic.complete) == 37
     assert all(calculate_paper_score(item, prepared).final_score >= 60 for item in items)
@@ -351,6 +354,61 @@ def test_invalid_cached_vector_is_reencoded_and_repaired_without_duplicate_row(
     repaired = db_session.query(SemanticEmbedding).filter_by(kind="passage").one()
     assert len(repaired.vector) == MODEL_DIMENSION
     assert repaired.vector == unit_vector()
-    assert db_session.query(SemanticEmbedding).count() == 2
+    assert db_session.query(SemanticEmbedding).count() == 3
     assert prepared.semantic.status == "ready"
     assert runtime.passages == [[paper_text(item)]]
+
+
+def test_broad_description_similarity_cannot_replace_core_topic_similarity(
+    db_session: Session, runtime: FakeRuntime,
+) -> None:
+    context = seed_context(db_session)
+    item = paper()
+    runtime.query_axes[group_anchor_text(context.groups[0])] = 1
+
+    prepared = prepare_semantic_context(db_session, context, [item])
+    match = prepared.semantic.matches[text_hash(paper_text(item))][
+        text_hash(group_text(context.groups[0]))
+    ]
+
+    assert match.profile_similarity == 1
+    assert match.anchor_similarity == 0
+    assert match.similarity == 0
+    assert match.score == 0
+    assert calculate_paper_score(item, prepared).final_score == 0
+
+
+def test_empty_paper_text_does_not_block_semantics_for_other_papers_in_batch(
+    db_session: Session, runtime: FakeRuntime,
+) -> None:
+    context = seed_context(db_session)
+    valid = paper()
+    empty = paper(1, title=" \t ", abstract="\n ")
+
+    prepared = prepare_semantic_context(db_session, context, [valid, empty])
+
+    assert prepared.semantic.status == "ready"
+    assert prepared.semantic.error is None
+    assert runtime.passages == [[paper_text(valid)]]
+    assert text_hash("") in prepared.semantic.complete
+    assert prepared.semantic.matches[text_hash("")] == {}
+    assert calculate_paper_score(valid, prepared).final_score >= 60
+    assert calculate_paper_score(empty, prepared).final_score == 0
+
+
+def test_all_empty_papers_are_complete_without_loading_runtime(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = seed_context(db_session)
+    items = [paper(title="", abstract=""), paper(1, title="\t", abstract=" \n")]
+
+    def unexpected_runtime():
+        pytest.fail("Empty passages need no inference")
+
+    monkeypatch.setattr(semantic_index, "get_runtime", unexpected_runtime)
+    prepared = prepare_semantic_context(db_session, context, items)
+
+    assert prepared.semantic.status == "ready"
+    assert prepared.semantic.complete == {text_hash("")}
+    assert prepared.semantic.matches == {text_hash(""): {}}
+    assert db_session.query(SemanticEmbedding).count() == 0

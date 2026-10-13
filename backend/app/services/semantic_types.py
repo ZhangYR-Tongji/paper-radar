@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from app.models.keyword_group import KeywordGroup
 from app.models.paper import Paper
+from app.models.semantic import DEFAULT_MIN_SIMILARITY, DEFAULT_SEMANTIC_WEIGHT
 from app.services.keyword_matching import unique_keywords
 
 TEXT_VERSION = "paper-radar-semantic-v1"
@@ -41,6 +42,20 @@ def group_text(group: KeywordGroup) -> str:
     )[:3000]
 
 
+def group_anchor_text(group: KeywordGroup) -> str:
+    keywords = unique_keywords(
+        [
+            *(group.positive_keywords or []),
+            *(group.required_keywords or []),
+        ]
+    )
+    if not keywords:
+        return group_text(group)
+    # A second focused query prevents broad methods in a long description
+    # from turning generic domain similarity into a topic match.
+    return f"Research on {'; '.join(keywords[:20])}."[:3000]
+
+
 def cosine_similarity(left: list[float], right: list[float]) -> float:
     if not left or len(left) != len(right):
         raise ValueError("Embedding dimensions do not match.")
@@ -68,13 +83,15 @@ def similarity_to_score(similarity: float, threshold: float) -> float:
 class SemanticMatch:
     similarity: float
     score: float
+    profile_similarity: float | None = None
+    anchor_similarity: float | None = None
 
 
 @dataclass(frozen=True)
 class SemanticEvidence:
     enabled: bool = False
-    min_similarity: float = 0.80
-    weight: float = 0.90
+    min_similarity: float = DEFAULT_MIN_SIMILARITY
+    weight: float = DEFAULT_SEMANTIC_WEIGHT
     model: str = ""
     status: str = "disabled"
     error: str | None = None

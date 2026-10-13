@@ -21,6 +21,7 @@ MODEL_DIMENSION = 384
 MODEL_MAX_TOKENS = 512
 _MODEL_DIRECTORY = f"multilingual-e5-small-{MODEL_REVISION[:12]}"
 _READY_FILE = "paper-radar-model.json"
+_FAILED_FILE = "paper-radar-model.failed.json"
 _REQUIRED_FILES = (
     "config.json",
     "tokenizer.json",
@@ -29,6 +30,7 @@ _REQUIRED_FILES = (
     "onnx/model.onnx",
 )
 _models: dict[tuple[str, int], tuple[Any, Any]] = {}
+_failed_paths: set[str] = set()
 _model_lock = threading.RLock()
 _prepare_lock = threading.Lock()
 
@@ -71,6 +73,8 @@ def _dependency_status() -> bool:
 
 
 def _cache_valid(model_dir: Path) -> bool:
+    if str(model_dir) in _failed_paths or (model_dir / _FAILED_FILE).exists():
+        return False
     try:
         metadata = json.loads((model_dir / _READY_FILE).read_text(encoding="utf-8"))
         if not isinstance(metadata, dict):
@@ -158,6 +162,22 @@ class LocalSemanticRuntime:
     def status(self) -> dict[str, Any]:
         return model_status(self.cache_dir)
 
+    def _mark_failed(self) -> None:
+        with _model_lock:
+            _failed_paths.add(str(self.model_dir))
+            for key in [key for key in _models if key[0] == str(self.model_dir)]:
+                del _models[key]
+        try:
+            (self.model_dir / _FAILED_FILE).write_text(json.dumps({
+                "model_id": MODEL_ID,
+                "revision": MODEL_REVISION,
+                "requires_repair": True,
+            }), encoding="utf-8")
+        except OSError:
+            # Read-only cache directories still fail readiness for this process.
+            # A later explicit preparation reports the underlying write failure.
+            pass
+
     def _load_model(self, *, verifying_download: bool = False) -> tuple[Any, Any]:
         if not verifying_download and not _cache_valid(self.model_dir):
             raise SemanticModelNotReadyError(
@@ -179,6 +199,7 @@ class LocalSemanticRuntime:
                         enable_cpu_mem_arena=False,
                     )
                 except Exception as exc:
+                    self._mark_failed()
                     raise SemanticModelError(
                         "本地语义模型加载失败，请重新准备模型或检查缓存目录权限。"
                     ) from exc
@@ -202,6 +223,10 @@ class LocalSemanticRuntime:
                     "请先安装本地语义依赖：python -m pip install -r requirements-semantic.txt。"
                 )
             if force_download or not _cache_valid(self.model_dir):
+                repairing = (
+                    force_download or str(self.model_dir) in _failed_paths
+                    or (self.model_dir / _FAILED_FILE).exists()
+                )
                 try:
                     from huggingface_hub import snapshot_download
 
@@ -214,7 +239,7 @@ class LocalSemanticRuntime:
                         allow_patterns=list(_REQUIRED_FILES),
                         local_dir=self.model_dir,
                         max_workers=2,
-                        force_download=force_download,
+                        force_download=repairing,
                     )
                 except Exception as exc:
                     raise SemanticModelError(
@@ -241,7 +266,11 @@ class LocalSemanticRuntime:
                     temporary = self.model_dir / f"{_READY_FILE}.tmp"
                     temporary.write_text(json.dumps(metadata), encoding="utf-8")
                     temporary.replace(self.model_dir / _READY_FILE)
+                    (self.model_dir / _FAILED_FILE).unlink(missing_ok=True)
+                    with _model_lock:
+                        _failed_paths.discard(str(self.model_dir))
                 except Exception as exc:
+                    self._mark_failed()
                     raise SemanticModelError(
                         "语义模型验证失败，请重新下载模型。"
                     ) from exc
@@ -269,9 +298,13 @@ class LocalSemanticRuntime:
                         parallel=None,
                     )
                 ]
+        except SemanticModelError:
+            self._mark_failed()
+            raise
         except SemanticRuntimeError:
             raise
         except Exception as exc:
+            self._mark_failed()
             raise SemanticModelError("本地语义编码失败，请检查模型状态。") from exc
 
     def encode_queries(self, texts: list[str]) -> list[list[float]]:

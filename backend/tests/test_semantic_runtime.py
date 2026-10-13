@@ -11,6 +11,7 @@ from app.services import semantic_runtime as runtime
 @pytest.fixture(autouse=True)
 def isolated_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime, "_models", {})
+    monkeypatch.setattr(runtime, "_failed_paths", set())
     runtime._get_runtime.cache_clear()
 
 
@@ -165,3 +166,57 @@ def test_lock_covers_lazy_generator_consumption(tmp_path):
 def test_invalid_embedding_fails_clearly(invalid):
     with pytest.raises(runtime.SemanticModelError):
         runtime._normalize_embedding(invalid)
+
+
+def test_same_size_model_corruption_load_failure_requires_forced_repair(tmp_path, monkeypatch):
+    model_dir = write_cached_model(tmp_path)
+    # File-size checks alone cannot detect this kind of corrupted download.
+    (model_dir / "onnx/model.onnx").write_bytes(b"corrupt")
+    assert runtime.model_status(tmp_path)["model_cached"] is True
+
+    def failed_load(**_kwargs):
+        raise ValueError("Invalid ONNX graph")
+
+    monkeypatch.setattr(runtime, "_embedding_class", lambda: failed_load)
+    instance = runtime.get_runtime(tmp_path)
+    with pytest.raises(runtime.SemanticModelError, match="加载失败"):
+        instance.encode_queries(["robot"])
+    assert (model_dir / runtime._FAILED_FILE).is_file()
+    assert instance.status()["model_cached"] is False
+    assert instance.status()["loaded"] is False
+
+    downloads = []
+
+    def repair_download(**kwargs):
+        downloads.append(kwargs)
+        write_cached_model(tmp_path)
+
+    monkeypatch.setattr(runtime, "_dependency_status", lambda: True)
+    monkeypatch.setattr(runtime, "_embedding_class", lambda: FakeEmbedding)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(
+        snapshot_download=repair_download,
+    ))
+    # Even across restarts, the failure marker must trigger a fresh download.
+    runtime._failed_paths.clear()
+    assert instance.prepare_model()["model_cached"] is True
+    assert downloads[0]["force_download"] is True
+    assert not (model_dir / runtime._FAILED_FILE).exists()
+    assert len(instance.encode_queries(["robot"])) == 1
+
+
+def test_inference_failure_invalidates_and_evicts_cached_model(tmp_path, monkeypatch):
+    model_dir = write_cached_model(tmp_path)
+
+    class FailedInference(FakeEmbedding):
+        def embed(self, _texts, **_kwargs):
+            raise RuntimeError("Inference failed")
+
+    monkeypatch.setattr(runtime, "_embedding_class", lambda: FailedInference)
+    instance = runtime.get_runtime(tmp_path)
+    with pytest.raises(runtime.SemanticModelError, match="编码失败"):
+        instance.encode_passages(["robot"])
+    assert (model_dir / runtime._FAILED_FILE).exists()
+    assert instance.status()["model_cached"] is False
+    assert not runtime._models
+    with pytest.raises(runtime.SemanticModelNotReadyError):
+        instance.encode_passages(["robot"])

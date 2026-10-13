@@ -13,7 +13,7 @@ from app.models.scoring import (
     SCORING_VERSION,
     ScoringWeights,
 )
-from app.models.semantic import SemanticSettings
+from app.models.semantic import DEFAULT_MIN_SIMILARITY, DEFAULT_SEMANTIC_WEIGHT, SemanticSettings
 from app.models.source_config import SourceConfig
 from app.services.keyword_matching import contains_keyword, normalize_text, unique_keywords
 from app.services.semantic_types import (
@@ -90,8 +90,8 @@ def load_scoring_context(db: Session) -> ScoringContext:
         ranked_sources,
         SemanticEvidence(
             enabled=bool(semantic and semantic.is_enabled),
-            min_similarity=semantic.min_similarity if semantic else 0.80,
-            weight=semantic.semantic_weight if semantic else 0.90,
+            min_similarity=semantic.min_similarity if semantic else DEFAULT_MIN_SIMILARITY,
+            weight=semantic.semantic_weight if semantic else DEFAULT_SEMANTIC_WEIGHT,
             status="unavailable" if semantic and semantic.is_enabled else "disabled",
         ),
     )
@@ -205,6 +205,8 @@ def calculate_paper_score(paper: Paper, context: ScoringContext) -> ScoreBreakdo
         "model": context.semantic.model,
         "group": winning.group.name if winning else None,
         "similarity": round(semantic_match.similarity, 6) if semantic_match else None,
+        "profile_similarity": semantic_match.profile_similarity if semantic_match else None,
+        "anchor_similarity": semantic_match.anchor_similarity if semantic_match else None,
         "semantic_score": round(semantic_match.score, 2) if semantic_match else 0.0,
         "lexical_topic_score": lexical_topic,
         "match_type": (

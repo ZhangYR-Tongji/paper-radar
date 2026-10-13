@@ -25,8 +25,8 @@ def upgrade() -> None:
             "semantic_settings",
             sa.Column("id", sa.Integer(), primary_key=True),
             sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
-            sa.Column("min_similarity", sa.Float(), nullable=False, server_default="0.80"),
-            sa.Column("semantic_weight", sa.Float(), nullable=False, server_default="0.90"),
+            sa.Column("min_similarity", sa.Float(), nullable=False, server_default="0.82"),
+            sa.Column("semantic_weight", sa.Float(), nullable=False, server_default="0.75"),
             *_timestamps(),
         )
     if not inspector.has_table("semantic_embeddings"):

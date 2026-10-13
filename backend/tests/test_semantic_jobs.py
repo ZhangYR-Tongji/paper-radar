@@ -13,7 +13,11 @@ from sqlalchemy.pool import StaticPool
 from app.api.routes import semantic as semantic_api
 from app.db.session import Base, get_db
 from app.models import KeywordGroup, Paper, PaperFeature, ScoringWeights
-from app.models.semantic import SemanticSettings
+from app.models.semantic import (
+    DEFAULT_MIN_SIMILARITY,
+    DEFAULT_SEMANTIC_WEIGHT,
+    SemanticSettings,
+)
 from app.services import semantic_index, semantic_jobs
 from app.services.scoring import load_scoring_context, rescore_all_papers
 from app.services.semantic_runtime import MODEL_DIMENSION, SemanticModelError
@@ -92,8 +96,8 @@ def test_semantic_get_reports_dependency_and_model_readiness_without_loading(
     assert body["model_ready"] is (installed and cached)
     assert body["dependencies_ready"] is installed
     assert body["is_enabled"] is True
-    assert body["min_similarity"] == 0.8
-    assert body["semantic_weight"] == 0.9
+    assert body["min_similarity"] == DEFAULT_MIN_SIMILARITY
+    assert body["semantic_weight"] == DEFAULT_SEMANTIC_WEIGHT
 
 
 @pytest.mark.parametrize("path", ["prepare", "reindex"])
@@ -192,7 +196,7 @@ def test_semantic_put_commits_before_scheduling_and_preserves_omitted_fields(
 
     assert response.status_code == 200
     assert response.json()["min_similarity"] == 0.85
-    assert response.json()["semantic_weight"] == 0.9
+    assert response.json()["semantic_weight"] == DEFAULT_SEMANTIC_WEIGHT
     assert scheduled == [{}]
 
 
@@ -324,3 +328,51 @@ def test_index_job_does_not_start_without_ready_model(
 
     assert semantic_jobs.start_semantic_job() is False
     assert semantic_jobs._job["status"] == "idle"
+
+
+def test_new_settings_after_final_commit_are_reindexed_before_job_completes(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'completion-window.db'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False)
+    with factory() as db:
+        db.add_all([SemanticSettings(), ScoringWeights()])
+        seed_paper(db)
+    monkeypatch.setattr(semantic_index, "get_runtime", lambda: PerfectRuntime())
+    monkeypatch.setattr(semantic_jobs, "model_status", lambda: {
+        "dependencies_installed": True, "model_cached": True,
+    })
+    requested = []
+    inference_sessions = []
+
+    def request_after_commit(session):
+        if requested:
+            return
+        assert semantic_jobs._job["status"] == "indexing"
+        with factory() as other_db:
+            other_db.query(KeywordGroup).one().required_keywords = ["new-required-term"]
+            other_db.commit()
+        requested.append(semantic_jobs.start_semantic_job(session_factory=factory))
+
+    def rescore_and_request_after_commit(db, **kwargs):
+        result = rescore_all_papers(db, **kwargs)
+        event.listen(db, "after_commit", request_after_commit, once=True)
+        return result
+
+    def record_inference(db, context, papers, **kwargs):
+        inference_sessions.append(db)
+        return semantic_index.prepare_semantic_context(db, context, papers, **kwargs)
+
+    monkeypatch.setattr(semantic_jobs, "rescore_all_papers", rescore_and_request_after_commit)
+    monkeypatch.setattr(semantic_jobs, "prepare_semantic_context", record_inference)
+
+    semantic_jobs._run_semantic_job(prepare=False, session_factory=factory)
+
+    assert requested == [False]
+    assert len(inference_sessions) == 2
+    assert semantic_jobs._job["status"] == "completed"
+    with factory() as db:
+        assert db.query(PaperFeature).one().final_score == 0
+        assert semantic_jobs.needs_semantic_index(db) is False
+    engine.dispose()

@@ -20,6 +20,7 @@ from app.services.semantic_runtime import (
 from app.services.semantic_types import (
     SemanticMatch,
     cosine_similarity,
+    group_anchor_text,
     group_text,
     paper_text,
     similarity_to_score,
@@ -38,6 +39,7 @@ def semantic_index_key(context: "ScoringContext") -> str:
         json.dumps(
             {
                 "model": MODEL_KEY,
+                "query_strategy": "profile-and-primary-v2",
                 "profiles": sorted(
                     group_text(group)
                     for group in context.groups
@@ -117,15 +119,29 @@ def prepare_semantic_context(
         and group.priority_weight != 0
         and (profile := group_text(group))
     }
-    passages = {text_hash(paper_text(paper)): paper_text(paper) for paper in papers}
+    anchors = {
+        text_hash(group_text(group)): text_hash(group_anchor_text(group))
+        for group in context.groups
+        if group.is_enabled is not False and group.priority_weight != 0 and group_text(group)
+    }
+    profiles.update(
+        {
+            text_hash(group_anchor_text(group)): group_anchor_text(group)
+            for group in context.groups
+            if group.is_enabled is not False and group.priority_weight != 0 and group_text(group)
+        }
+    )
+    all_passages = {text_hash(paper_text(paper)): paper_text(paper) for paper in papers}
+    passages = {key: value for key, value in all_passages.items() if value}
+    empty_passages = set(all_passages) - set(passages)
     query_vectors = _cached_vectors(db, "query", list(profiles))
     passage_vectors = _cached_vectors(db, "passage", list(passages))
     generated: dict[str, dict[str, list[float]]] = {"query": {}, "passage": {}}
     error = None
     if progress:
-        progress(len(passage_vectors), len(passages))
+        progress(len(empty_passages) + len(passage_vectors), len(all_passages))
 
-    if compute_missing and profiles:
+    if compute_missing and profiles and passages:
         try:
             runtime = get_runtime()
             for kind, texts, vectors, encode in [
@@ -142,7 +158,7 @@ def prepare_semantic_context(
                         vectors[key] = vector
                         generated[kind][key] = vector
                     if progress and kind == "passage":
-                        progress(len(passage_vectors), len(passages))
+                        progress(len(empty_passages) + len(passage_vectors), len(all_passages))
         except (SemanticRuntimeError, ValueError) as exc:
             error = str(exc)
 
@@ -150,8 +166,8 @@ def prepare_semantic_context(
     for kind, vectors in generated.items():
         _cache_vectors(db, kind, vectors)
 
-    complete = set()
-    matches: dict[str, dict[str, SemanticMatch]] = {}
+    complete = set(empty_passages)
+    matches: dict[str, dict[str, SemanticMatch]] = {key: {} for key in empty_passages}
     for key in passages:
         if not profiles:
             complete.add(key)
@@ -160,11 +176,17 @@ def prepare_semantic_context(
         if key not in passage_vectors:
             continue
         matches[key] = {}
-        for profile_key, query_vector in query_vectors.items():
-            similarity = cosine_similarity(query_vector, passage_vectors[key])
+        for profile_key, anchor_key in anchors.items():
+            if profile_key not in query_vectors or anchor_key not in query_vectors:
+                continue
+            profile_similarity = cosine_similarity(query_vectors[profile_key], passage_vectors[key])
+            anchor_similarity = cosine_similarity(query_vectors[anchor_key], passage_vectors[key])
+            similarity = min(profile_similarity, anchor_similarity)
             matches[key][profile_key] = SemanticMatch(
                 similarity=similarity,
                 score=similarity_to_score(similarity, context.semantic.min_similarity),
+                profile_similarity=profile_similarity,
+                anchor_similarity=anchor_similarity,
             )
         if len(query_vectors) == len(profiles):
             complete.add(key)
@@ -173,7 +195,7 @@ def prepare_semantic_context(
         semantic=replace(
             context.semantic,
             model=MODEL_ID,
-            status="ready" if len(complete) == len(passages) else "unavailable",
+            status="ready" if len(complete) == len(all_passages) else "unavailable",
             error=error,
             index_key=semantic_index_key(context),
             complete=complete,

@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.paper import Paper, PaperFeature
-from app.models.semantic import SemanticEmbedding, SemanticSettings
+from app.models.semantic import (
+    DEFAULT_MIN_SIMILARITY,
+    DEFAULT_SEMANTIC_WEIGHT,
+    SemanticEmbedding,
+    SemanticSettings,
+)
 from app.services.scoring import load_scoring_context, rescore_all_papers
 from app.services.semantic_index import MODEL_KEY, prepare_semantic_context, semantic_index_key
 from app.services.semantic_runtime import MODEL_ID, SemanticRuntimeError, get_runtime, model_status
@@ -34,8 +39,8 @@ def semantic_status(db: Session) -> dict[str, object]:
         job = dict(_job)
     return {
         "is_enabled": config.is_enabled if config else True,
-        "min_similarity": config.min_similarity if config else 0.80,
-        "semantic_weight": config.semantic_weight if config else 0.90,
+        "min_similarity": config.min_similarity if config else DEFAULT_MIN_SIMILARITY,
+        "semantic_weight": config.semantic_weight if config else DEFAULT_SEMANTIC_WEIGHT,
         "model_name": MODEL_ID,
         "model_ready": installed and cached,
         "dependencies_ready": installed,
@@ -44,7 +49,14 @@ def semantic_status(db: Session) -> dict[str, object]:
         else "missing_model"
         if not cached
         else "ready",
-        "cached_papers": db.query(SemanticEmbedding)
+        "cached_papers": db.query(PaperFeature.paper_id)
+        .join(
+            SemanticEmbedding,
+            (
+                SemanticEmbedding.content_hash
+                == PaperFeature.semantic_details["content_hash"].as_string()
+            ),
+        )
         .filter(
             SemanticEmbedding.model_key == MODEL_KEY,
             SemanticEmbedding.kind == "passage",
@@ -95,12 +107,17 @@ def start_semantic_job(
             return False
     with _job_lock:
         if _job["status"] in {"preparing", "indexing"}:
+            # A settings commit can arrive after the final DB commit but before
+            # this worker publishes completion. Remember it instead of dropping
+            # the request while the task still appears busy.
+            _job["rerun_requested"] = True
             return False
         _job.update(
             status="preparing" if prepare else "indexing",
             error=None,
             processed_papers=0,
             total_papers=0,
+            rerun_requested=False,
         )
     threading.Thread(
         target=_run_semantic_job,
@@ -147,13 +164,16 @@ def _run_semantic_job(*, prepare: bool, session_factory: Callable[[], Session]) 
                 incomplete = needs_semantic_index(db)
                 db.commit()
             if not incomplete:
-                _update_job(
-                    status="completed",
-                    error=None,
-                    processed_papers=len(papers),
-                    total_papers=len(papers),
-                )
-                return
+                with _job_lock:
+                    if _job.pop("rerun_requested", False):
+                        continue
+                    _job.update(
+                        status="completed",
+                        error=None,
+                        processed_papers=len(papers),
+                        total_papers=len(papers),
+                    )
+                    return
         raise SemanticRuntimeError("研究方向在重算期间发生变化，请重新执行语义重算。")
     except Exception as exc:  # noqa: BLE001
         _update_job(status="failed", error=str(exc))
