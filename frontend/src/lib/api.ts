@@ -7,6 +7,7 @@ import type {
   FetchRunItem,
   KeywordGroup,
   Paper,
+  SemanticDetails,
   SourceConfig,
 } from "./types";
 
@@ -18,7 +19,8 @@ export async function apiGet<T>(path: string): Promise<T> {
     cache: "no-store",
   });
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    const message = await parseErrorMessage(response);
+    throw new Error(message || `API request failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
 }
@@ -64,6 +66,30 @@ async function parseErrorMessage(response: Response): Promise<string> {
 
 export type ApiPaper = Record<string, unknown>;
 
+function mapSemanticDetails(value: unknown): SemanticDetails | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const details = value as Record<string, unknown>;
+  if (!["applied", "unavailable", "disabled"].includes(String(details.status))) {
+    return undefined;
+  }
+  const finiteNumber = (item: unknown) =>
+    typeof item === "number" && Number.isFinite(item) ? item : null;
+  const matchType = String(details.match_type);
+  return {
+    status: details.status as SemanticDetails["status"],
+    model: typeof details.model === "string" ? details.model : "",
+    group: typeof details.group === "string" ? details.group : null,
+    similarity: finiteNumber(details.similarity),
+    semanticScore: finiteNumber(details.semantic_score) ?? 0,
+    lexicalTopicScore: finiteNumber(details.lexical_topic_score) ?? 0,
+    matchType: ["lexical", "semantic", "hybrid", "none"].includes(matchType)
+      ? (matchType as SemanticDetails["matchType"])
+      : "none",
+  };
+}
+
 export function mapPaper(item: ApiPaper): Paper {
   return {
     id: Number(item.id),
@@ -86,6 +112,7 @@ export function mapPaper(item: ApiPaper): Paper {
     personalNote: String(item.personal_note ?? ""),
     url: (item.url as string | null) ?? null,
     pdfUrl: (item.pdf_url as string | null) ?? null,
+    semanticDetails: mapSemanticDetails(item.semantic_details),
   };
 }
 

@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { PaperCard } from "@/components/paper-card";
 import { apiGet, apiSend, mapPaper, type ApiPaper } from "@/lib/api";
 import type { FeedbackPayload, Paper } from "@/lib/types";
+import { useSemanticRefresh } from "@/lib/use-semantic-refresh";
 
 const PAGE_SIZE = 50;
 
@@ -62,6 +63,8 @@ export default function SearchPage() {
   useEffect(() => {
     loadPapers();
   }, [loadPapers]);
+
+  useSemanticRefresh(loadPapers);
 
   const updateFeedback = async (paperId: number, payload: FeedbackPayload) => {
     await apiSend(`/papers/${paperId}/feedback`, "PUT", payload);

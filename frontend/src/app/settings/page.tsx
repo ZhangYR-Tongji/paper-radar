@@ -4,6 +4,7 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { PageHeader } from "@/components/page-header";
+import { SemanticSettings } from "@/components/semantic-settings";
 import {
   apiGet,
   apiSend,
@@ -23,6 +24,7 @@ export default function SettingsPage() {
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [recommendationMinScore, setRecommendationMinScore] = useState(50);
   const [message, setMessage] = useState<string | null>(null);
+  const [semanticRefreshVersion, setSemanticRefreshVersion] = useState(0);
 
   const loadSettings = async () => {
     const [sourceData, groupData, scoringData, preferencesData] = await Promise.all([
@@ -64,6 +66,7 @@ export default function SettingsPage() {
       current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
     );
     setMessage("数据源已保存");
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const updateGroup = async (group: KeywordGroup) => {
@@ -78,6 +81,7 @@ export default function SettingsPage() {
       optional_keywords: normalizeKeywords(group.optionalKeywords),
     });
     setMessage("关键词组已保存");
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const createGroup = async () => {
@@ -93,22 +97,26 @@ export default function SettingsPage() {
       related_tags: [],
     });
     setGroups((current) => [...current, mapKeywordGroup(created)]);
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const deleteGroup = async (id: number) => {
     await apiSend(`/settings/keyword-groups/${id}`, "DELETE");
     setGroups((current) => current.filter((group) => group.id !== id));
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const clearGroups = async () => {
     await apiSend("/settings/keyword-groups/clear", "POST");
     setGroups([]);
     setMessage("关键词组已清空");
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const saveWeights = async () => {
     await apiSend("/settings/scoring-weights", "PUT", weights);
     setMessage("评分权重已保存");
+    setSemanticRefreshVersion((current) => current + 1);
   };
 
   const savePreferences = async () => {
@@ -124,7 +132,7 @@ export default function SettingsPage() {
     <>
       <PageHeader
         title="设置"
-        description="配置数据源、关键词组和评分权重。配置保存在本地数据库中。"
+        description="配置数据源、研究方向、语义候选和评分权重。配置保存在本地数据库中。"
         action={
           <button
             className="inline-flex h-10 items-center gap-2 rounded-md bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
@@ -299,6 +307,8 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      <SemanticSettings refreshVersion={semanticRefreshVersion} />
+
       <section>
         <h2 className="mb-3 text-base font-semibold text-zinc-950">评分权重</h2>
         <p className="mb-4 text-sm leading-6 text-zinc-500">
@@ -366,10 +376,11 @@ function KeywordGroupEditor({
         />
       </div>
       <label className="mb-2 block text-sm font-medium text-zinc-700">
-        说明
+        研究方向描述（用于发现语义候选）
         <textarea
           className="mt-1 min-h-16 w-full rounded-md border border-zinc-200 p-2 text-sm leading-5"
           value={group.description}
+          placeholder="例如：研究腱驱动连续体机器人的建模、运动控制与接触操作，希望找到具有实物实验的新方法。"
           onChange={(event) => onChange({ ...group, description: event.target.value })}
         />
       </label>

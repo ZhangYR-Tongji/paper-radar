@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { PaperCard } from "@/components/paper-card";
 import { apiGet, apiSend, mapFetchRun } from "@/lib/api";
 import type { FeedbackPayload, FetchRun } from "@/lib/types";
+import { useSemanticRefresh } from "@/lib/use-semantic-refresh";
 
 const PAGE_SIZE = 50;
 
@@ -44,6 +45,8 @@ export default function FetchRunPage() {
   useEffect(() => {
     loadRun();
   }, [loadRun]);
+
+  useSemanticRefresh(loadRun);
 
   const updateFeedback = async (paperId: number, payload: FeedbackPayload) => {
     await apiSend(`/papers/${paperId}/feedback`, "PUT", payload);

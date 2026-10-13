@@ -13,6 +13,7 @@ import {
   type ApiPaper,
 } from "@/lib/api";
 import type { FeedbackPayload, Paper } from "@/lib/types";
+import { useSemanticRefresh } from "@/lib/use-semantic-refresh";
 
 const filters = [
   { label: "全部", value: "all" },
@@ -63,6 +64,8 @@ export default function LibraryPage() {
   useEffect(() => {
     loadLibrary();
   }, [loadLibrary]);
+
+  useSemanticRefresh(loadLibrary);
 
   const updateFeedback = async (paperId: number, payload: FeedbackPayload) => {
     await apiSend(`/papers/${paperId}/feedback`, "PUT", payload);

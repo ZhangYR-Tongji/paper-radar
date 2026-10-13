@@ -4,6 +4,31 @@ export type Classification =
   | "Low Priority"
   | "Filtered";
 
+export type SemanticDetails = {
+  status: "applied" | "unavailable" | "disabled";
+  model: string;
+  group: string | null;
+  similarity: number | null;
+  semanticScore: number;
+  lexicalTopicScore: number;
+  matchType: "lexical" | "semantic" | "hybrid" | "none";
+};
+
+export type SemanticSettingsResponse = {
+  is_enabled: boolean;
+  min_similarity: number;
+  semantic_weight: number;
+  model_name: string;
+  model_ready: boolean;
+  dependencies_ready: boolean;
+  runtime_status: "ready" | "missing_dependency" | "missing_model" | "error";
+  status: "idle" | "preparing" | "indexing" | "completed" | "failed";
+  error: string | null;
+  processed_papers: number;
+  total_papers: number;
+  cached_papers: number;
+};
+
 export type Paper = {
   id: number;
   score: number;
@@ -25,6 +50,7 @@ export type Paper = {
   personalNote: string;
   url: string | null;
   pdfUrl: string | null;
+  semanticDetails?: SemanticDetails;
 };
 
 export type SourceConfig = {

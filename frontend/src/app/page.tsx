@@ -15,6 +15,7 @@ import {
   type ApiPaper,
 } from "@/lib/api";
 import type { FeedbackPayload, FetchRun, Paper } from "@/lib/types";
+import { useSemanticRefresh } from "@/lib/use-semantic-refresh";
 
 type LatestResponse = {
   latest_fetch_run: Record<string, unknown> | null;
@@ -118,6 +119,10 @@ export default function Home() {
   useEffect(() => {
     loadLatest().catch(() => {});
   }, [loadLatest]);
+
+  const semanticStatus = useSemanticRefresh(loadLatest);
+  const isUpdatingSemantics = semanticStatus?.status === "preparing" ||
+    semanticStatus?.status === "indexing";
 
   const startFetch = async () => {
     setIsFetching(true);
@@ -242,6 +247,23 @@ export default function Home() {
           </div>
         }
       />
+
+      {isUpdatingSemantics ? (
+        <div className="mb-5 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800" role="status" aria-live="polite">
+          正在更新语义推荐，完成后自动刷新。
+          {semanticStatus.status === "indexing" && semanticStatus.total_papers > 0 ? (
+            <>
+              <span className="ml-2">{semanticStatus.processed_papers} / {semanticStatus.total_papers} 篇</span>
+              <progress
+                className="mt-2 block h-2 w-full accent-violet-700"
+                value={semanticStatus.processed_papers}
+                max={semanticStatus.total_papers}
+                aria-label="语义推荐更新进度"
+              />
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {error ? (
         <div className="mb-5 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">

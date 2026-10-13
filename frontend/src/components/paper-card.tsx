@@ -52,6 +52,20 @@ export function PaperCard({
     }
   };
 
+  const semanticDetails = paper.semanticDetails;
+  const hasSemanticDetails =
+    semanticDetails?.status === "applied" &&
+    typeof semanticDetails.similarity === "number" &&
+    Number.isFinite(semanticDetails.similarity);
+  const hasSemanticMatch = hasSemanticDetails &&
+    (semanticDetails.matchType === "semantic" || semanticDetails.matchType === "hybrid");
+  const matchTypeLabels = {
+    lexical: "关键词匹配",
+    semantic: "语义候选",
+    hybrid: "关键词匹配与语义候选",
+    none: "未达到匹配门槛",
+  };
+
   return (
     <article className="rounded-md border border-zinc-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -162,6 +176,11 @@ export function PaperCard({
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
+        {hasSemanticMatch && semanticDetails.group ? (
+          <span className="rounded-md bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-800">
+            语义候选：{semanticDetails.group}
+          </span>
+        ) : null}
         {paper.matchedKeywordGroups.map((group) => (
           <span
             key={group}
@@ -187,6 +206,38 @@ export function PaperCard({
           </span>
         ))}
       </div>
+      {hasSemanticDetails ? (
+        <details className="mt-3 rounded-md border border-zinc-100 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+          <summary className="cursor-pointer font-medium text-zinc-700">评分依据</summary>
+          <dl className="mt-2 grid gap-x-5 gap-y-1.5 sm:grid-cols-2">
+            <div>
+              <dt className="inline">匹配方式：</dt>
+              <dd className="inline">{matchTypeLabels[semanticDetails.matchType]}</dd>
+            </div>
+            {semanticDetails.group ? (
+              <div>
+                <dt className="inline">研究方向：</dt>
+                <dd className="inline">{semanticDetails.group}</dd>
+              </div>
+            ) : null}
+            <div>
+              <dt className="inline">模型相似度：</dt>
+              <dd className="inline">{semanticDetails.similarity?.toFixed(3)}</dd>
+            </div>
+            <div>
+              <dt className="inline">语义主题分：</dt>
+              <dd className="inline">{semanticDetails.semanticScore.toFixed(1)}</dd>
+            </div>
+            <div>
+              <dt className="inline">关键词主题分：</dt>
+              <dd className="inline">{semanticDetails.lexicalTopicScore.toFixed(1)}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 leading-5 text-zinc-500">
+            语义候选表示论文可能相关。模型相似度衡量标题摘要与研究方向的接近程度，不代表相关概率。主题分会与其他评分项合并为最终得分。
+          </p>
+        </details>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         <a
           href={paper.url ?? "#"}
