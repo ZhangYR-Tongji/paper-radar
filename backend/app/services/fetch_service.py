@@ -12,6 +12,7 @@ from app.models.source_config import SourceConfig
 from app.schemas.fetch import ManualFetchRequest
 from app.services.deduplication import find_duplicate_paper, normalize_title
 from app.services.scoring import ScoringContext, load_scoring_context, score_paper
+from app.services.semantic_index import prepare_semantic_context
 from app.sources.arxiv_adapter import ArxivAdapter
 from app.sources.base import PaperResult
 from app.sources.crossref_adapter import CrossrefAdapter
@@ -68,9 +69,7 @@ def run_manual_fetch(db: Session, payload: ManualFetchRequest) -> FetchRun:
         requested_to=fetch_to,
         overlap_buffer_days=payload.overlap_buffer_days,
         enabled_sources=[source.source_name for source in sources],
-        enabled_keyword_groups=[
-            {"id": group.id, "name": group.name} for group in keyword_groups
-        ],
+        enabled_keyword_groups=[{"id": group.id, "name": group.name} for group in keyword_groups],
     )
     db.add(run)
     try:
@@ -149,17 +148,14 @@ def _execute_fetch_items(
             )
             previous_items = (
                 [
-                    _previous_range_item(
-                        db, payload.mode, source.source_name, group.id, start, end
-                    )
+                    _previous_range_item(db, payload.mode, source.source_name, group.id, start, end)
                     for start, end in fetch_windows
                 ]
                 if cursor is None
                 else []
             )
             resuming_range = any(
-                item and item.status in {"partial_limit", "failed"}
-                for item in previous_items
+                item and item.status in {"partial_limit", "failed"} for item in previous_items
             )
 
             remaining_budget = per_group_limit
@@ -282,9 +278,7 @@ def _execute_fetch_items(
                     run = db.get(FetchRun, run.id)
                     item = db.get(FetchRunItem, item_id)
                     source = db.get(SourceConfig, source.id)
-                    cursor = (
-                        _get_or_create_cursor(db, *cursor_scope) if cursor_scope else None
-                    )
+                    cursor = _get_or_create_cursor(db, *cursor_scope) if cursor_scope else None
                     message = f"{source.source_name} × {group.name}: {exc}"
                     error_messages.append(message)
                     item.status = "failed"
@@ -306,9 +300,12 @@ def _execute_fetch_items(
 
     if run.error_count == 0:
         run.status = "success"
-    elif run.total_raw_results or db.query(FetchRunItem).filter(
-        FetchRunItem.fetch_run_id == run.id, FetchRunItem.status == "success"
-    ).first():
+    elif (
+        run.total_raw_results
+        or db.query(FetchRunItem)
+        .filter(FetchRunItem.fetch_run_id == run.id, FetchRunItem.status == "success")
+        .first()
+    ):
         run.status = "partial_success"
     else:
         run.status = "failed"
@@ -445,6 +442,12 @@ def _store_results(
         "highly_relevant": 0,
         "low_priority": 0,
     }
+    # Encode the page in batches before paper INSERTs take a SQLite write lock.
+    scoring_context = prepare_semantic_context(
+        db,
+        scoring_context,
+        [_paper_from_result(result) for result in filtered_results],
+    )
 
     for result in filtered_results:
         duplicate = find_duplicate_paper(db, result)

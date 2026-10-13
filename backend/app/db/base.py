@@ -36,6 +36,7 @@ def init_db(db: Session) -> None:
     _ensure_user_preferences_schema()
     _ensure_fetch_schema()
     _ensure_scoring_schema()
+    _ensure_semantic_schema()
     seed_defaults(db)
     recover_interrupted_fetch_runs(db)
     _backfill_first_seen_run(db)
@@ -89,6 +90,21 @@ def _ensure_scoring_schema() -> None:
                 text(
                     "ALTER TABLE scoring_weights "
                     "ADD COLUMN algorithm_version INTEGER NOT NULL DEFAULT 1"
+                )
+            )
+
+
+def _ensure_semantic_schema() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("paper_features"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("paper_features")}
+    if "semantic_details" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE paper_features "
+                    "ADD COLUMN semantic_details JSON NOT NULL DEFAULT '{}'"
                 )
             )
 

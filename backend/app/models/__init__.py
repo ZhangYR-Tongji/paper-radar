@@ -3,6 +3,7 @@ from app.models.fetch import FetchCursor, FetchRun, FetchRunItem
 from app.models.keyword_group import KeywordGroup
 from app.models.paper import Paper, PaperFeature
 from app.models.scoring import ScoringWeights
+from app.models.semantic import SemanticEmbedding, SemanticSettings
 from app.models.source_config import SourceConfig
 
 __all__ = [
@@ -13,6 +14,8 @@ __all__ = [
     "Paper",
     "PaperFeature",
     "ScoringWeights",
+    "SemanticEmbedding",
+    "SemanticSettings",
     "SourceConfig",
     "UserFeedback",
     "UserPreferences",

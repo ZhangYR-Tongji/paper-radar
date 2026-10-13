@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.models.feedback import UserPreferences
 from app.models.scoring import ScoringWeights
+from app.models.semantic import SemanticSettings
 from app.models.source_config import SourceConfig
 
 DEFAULT_SOURCES = [
@@ -58,5 +59,8 @@ def seed_defaults(db: Session) -> None:
 
     if not db.query(UserPreferences).first():
         db.add(UserPreferences())
+
+    if not db.query(SemanticSettings).first():
+        db.add(SemanticSettings())
 
     db.commit()

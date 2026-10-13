@@ -19,7 +19,7 @@ LEGACY_SCORING_WEIGHTS = {
     "user_preference_weight": 0.10,
     "negative_filter_weight": 0.10,
 }
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 
 
 class ScoringWeights(IdMixin, TimestampMixin, Base):

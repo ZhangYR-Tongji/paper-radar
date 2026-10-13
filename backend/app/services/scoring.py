@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -12,8 +13,16 @@ from app.models.scoring import (
     SCORING_VERSION,
     ScoringWeights,
 )
+from app.models.semantic import SemanticSettings
 from app.models.source_config import SourceConfig
 from app.services.keyword_matching import contains_keyword, normalize_text, unique_keywords
+from app.services.semantic_types import (
+    SemanticEvidence,
+    SemanticMatch,
+    group_text,
+    paper_text,
+    text_hash,
+)
 
 BASE_WEIGHT_FIELDS = ("topic_weight", "method_weight", "venue_weight", "freshness_weight")
 
@@ -24,6 +33,7 @@ class ScoringContext:
     weights: ScoringWeights
     preferences: UserPreferences | None
     ranked_sources: dict[str, bool]
+    semantic: SemanticEvidence = field(default_factory=SemanticEvidence)
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,7 @@ class ScoreBreakdown:
     negative_filter_penalty: float
     final_score: float
     classification: str
+    semantic_details: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -49,6 +60,8 @@ class GroupEvidence:
     topic_score: float
     positive_hits: list[str]
     negative_hits: list[str]
+    lexical_topic_score: float = 0.0
+    semantic_match: SemanticMatch | None = None
 
 
 def classify_score(final_score: float) -> str:
@@ -69,18 +82,65 @@ def load_scoring_context(db: Session) -> ScoringContext:
         source.source_name: source.participates_in_ranking
         for source in db.query(SourceConfig).all()
     }
-    return ScoringContext(groups, weights, preferences, ranked_sources)
+    semantic = db.query(SemanticSettings).first()
+    return ScoringContext(
+        groups,
+        weights,
+        preferences,
+        ranked_sources,
+        SemanticEvidence(
+            enabled=bool(semantic and semantic.is_enabled),
+            min_similarity=semantic.min_similarity if semantic else 0.80,
+            weight=semantic.semantic_weight if semantic else 0.90,
+            status="unavailable" if semantic and semantic.is_enabled else "disabled",
+        ),
+    )
 
 
 def calculate_paper_score(paper: Paper, context: ScoringContext) -> ScoreBreakdown:
     title = normalize_text(paper.title or "")
     abstract = normalize_text(paper.abstract or "")
     text = f"{title}\n{abstract}"
-    evidence = [
-        match
-        for group in context.groups
-        if (match := _group_evidence(group, title, abstract)) is not None
-    ]
+    key = text_hash(paper_text(paper))
+    semantic_matches = context.semantic.matches.get(key, {}) if context.semantic.enabled else {}
+    evidence = []
+    for group in context.groups:
+        if group.is_enabled is False or group.priority_weight == 0:
+            continue
+        required = unique_keywords(group.required_keywords or [])
+        if not all(
+            contains_keyword(title, word) or contains_keyword(abstract, word) for word in required
+        ):
+            continue
+        lexical = _group_evidence(group, title, abstract)
+        semantic_match = semantic_matches.get(text_hash(group_text(group)))
+        semantic_topic = (
+            semantic_match.score * context.semantic.weight
+            if context.semantic.enabled and semantic_match
+            else 0.0
+        )
+        if lexical is None and semantic_topic == 0:
+            continue
+        lexical_topic = lexical.topic_score if lexical else 0.0
+        negative_hits = (
+            lexical.negative_hits
+            if lexical
+            else [
+                word
+                for word in unique_keywords(group.negative_keywords or [])
+                if contains_keyword(title, word) or contains_keyword(abstract, word)
+            ]
+        )
+        evidence.append(
+            GroupEvidence(
+                group=group,
+                topic_score=max(lexical_topic, semantic_topic),
+                positive_hits=lexical.positive_hits if lexical else [],
+                negative_hits=negative_hits,
+                lexical_topic_score=lexical_topic,
+                semantic_match=semantic_match,
+            )
+        )
     method_tags = _method_tags(text)
     method_score = min(100.0, len(method_tags) * 25.0)
     venue_score = _venue_score(paper)
@@ -128,6 +188,38 @@ def calculate_paper_score(paper: Paper, context: ScoringContext) -> ScoreBreakdo
     final_score = round(best[0], 2) if best else 0.0
     if not context.ranked_sources.get(paper.source, True):
         final_score = 0.0
+    winning = best[1] if best else None
+    semantic_match = winning.semantic_match if winning else None
+    lexical_topic = winning.lexical_topic_score if winning else 0.0
+    semantic_boost = bool(
+        semantic_match and semantic_match.score * context.semantic.weight > lexical_topic
+    )
+    details: dict[str, object] = {
+        "status": (
+            "disabled"
+            if not context.semantic.enabled
+            else "applied"
+            if key in context.semantic.complete
+            else "unavailable"
+        ),
+        "model": context.semantic.model,
+        "group": winning.group.name if winning else None,
+        "similarity": round(semantic_match.similarity, 6) if semantic_match else None,
+        "semantic_score": round(semantic_match.score, 2) if semantic_match else 0.0,
+        "lexical_topic_score": lexical_topic,
+        "match_type": (
+            "hybrid"
+            if semantic_boost and lexical_topic > 0
+            else "semantic"
+            if semantic_boost
+            else "lexical"
+            if lexical_topic > 0
+            else "none"
+        ),
+        "index_key": context.semantic.index_key,
+        "content_hash": key,
+        "index_complete": key in context.semantic.complete,
+    }
 
     return ScoreBreakdown(
         matched_groups=sorted({match.group.name for match in evidence}),
@@ -145,6 +237,7 @@ def calculate_paper_score(paper: Paper, context: ScoringContext) -> ScoreBreakdo
         negative_filter_penalty=best[3] if best else 0.0,
         final_score=final_score,
         classification=classify_score(final_score),
+        semantic_details=details,
     )
 
 
@@ -217,6 +310,10 @@ def score_paper(
     is_new: bool = False,
 ) -> PaperFeature:
     loaded_context = context or load_scoring_context(db)
+    if context is None:
+        from app.services.semantic_index import prepare_semantic_context
+
+        loaded_context = prepare_semantic_context(db, loaded_context, [paper])
     feature = (
         None if is_new else db.query(PaperFeature).filter(PaperFeature.paper_id == paper.id).first()
     )
@@ -229,13 +326,27 @@ def score_paper(
     return feature
 
 
-def rescore_all_papers(db: Session) -> None:
+def rescore_all_papers(
+    db: Session,
+    *,
+    compute_semantics: bool = True,
+    progress: Callable[[int, int], None] | None = None,
+) -> None:
     db.flush()
     context = load_scoring_context(db)
     rows = (
         db.query(Paper, PaperFeature)
         .outerjoin(PaperFeature, PaperFeature.paper_id == Paper.id)
         .all()
+    )
+    from app.services.semantic_index import prepare_semantic_context
+
+    context = prepare_semantic_context(
+        db,
+        context,
+        [paper for paper, _ in rows],
+        compute_missing=compute_semantics,
+        progress=progress,
     )
     for paper, feature in rows:
         if feature is None:
@@ -255,7 +366,9 @@ def upgrade_scoring(db: Session) -> None:
     if all(getattr(weights, name) == value for name, value in LEGACY_SCORING_WEIGHTS.items()):
         for name, value in DEFAULT_SCORING_WEIGHTS.items():
             setattr(weights, name, value)
-    rescore_all_papers(db)
+    # Startup must not load a model or perform inference before the desktop
+    # launcher health deadline. Missing vectors are filled by a separate job.
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
 
 
@@ -273,6 +386,7 @@ def _apply_score(feature: PaperFeature, score: ScoreBreakdown) -> None:
     feature.negative_filter_penalty = score.negative_filter_penalty
     feature.final_score = score.final_score
     feature.classification = score.classification
+    feature.semantic_details = score.semantic_details
 
 
 def _method_tags(text: str) -> list[str]:

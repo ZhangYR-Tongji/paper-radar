@@ -22,6 +22,7 @@ def paper_to_dict(
         "id": paper.id,
         "score": feature.final_score,
         "classification": feature.classification,
+        "semantic_details": feature.semantic_details or {},
         "title": paper.title,
         "normalized_title": paper.normalized_title,
         "abstract": paper.abstract,
@@ -90,12 +91,7 @@ def list_paper_dicts(
     if classification:
         query = query.filter(PaperFeature.classification == classification)
     if search_query:
-        escaped = (
-            search_query.strip()
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
+        escaped = search_query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         query = query.filter(
             or_(
@@ -103,9 +99,7 @@ def list_paper_dicts(
                 Paper.abstract.ilike(pattern, escape="\\"),
                 cast(Paper.authors, String).ilike(pattern, escape="\\"),
                 cast(PaperFeature.matched_keyword_groups, String).ilike(pattern, escape="\\"),
-                cast(PaperFeature.matched_positive_keywords, String).ilike(
-                    pattern, escape="\\"
-                ),
+                cast(PaperFeature.matched_positive_keywords, String).ilike(pattern, escape="\\"),
             )
         )
     if is_saved is not None:
@@ -241,9 +235,7 @@ def fetch_run_to_dict(
         "error_summary": run.error_summary,
         "items": [fetch_run_item_to_dict(item) for item in items],
         "papers": (
-            list_paper_dicts(
-                db, run=run, sort_by="score", limit=paper_limit, offset=paper_offset
-            )
+            list_paper_dicts(db, run=run, sort_by="score", limit=paper_limit, offset=paper_offset)
             if include_papers
             else []
         ),

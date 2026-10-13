@@ -19,6 +19,7 @@ from app.schemas.settings import (
     UserPreferencesUpdate,
 )
 from app.services.scoring import rescore_all_papers
+from app.services.semantic_jobs import schedule_semantic_completion
 
 router = APIRouter()
 
@@ -41,8 +42,9 @@ def update_source(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(source, field, value)
     if source.participates_in_ranking != was_ranked:
-        rescore_all_papers(db)
+        rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
     db.refresh(source)
     return source
 
@@ -63,8 +65,9 @@ def create_keyword_group(
 ) -> KeywordGroup:
     group = KeywordGroup(**payload.model_dump())
     db.add(group)
-    rescore_all_papers(db)
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
     db.refresh(group)
     return group
 
@@ -80,8 +83,9 @@ def update_keyword_group(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword group not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(group, field, value)
-    rescore_all_papers(db)
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
     db.refresh(group)
     return group
 
@@ -93,16 +97,18 @@ def delete_keyword_group(group_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Keyword group not found")
     db.query(FetchCursor).filter(FetchCursor.keyword_group_id == group_id).delete()
     db.delete(group)
-    rescore_all_papers(db)
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
 
 
 @router.post("/keyword-groups/clear", response_model=list[KeywordGroupRead])
 def clear_keyword_groups(db: Session = Depends(get_db)) -> list[KeywordGroup]:
     db.query(FetchCursor).delete()
     db.query(KeywordGroup).delete()
-    rescore_all_papers(db)
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
     return db.query(KeywordGroup).order_by(KeywordGroup.id).all()
 
 
@@ -128,8 +134,9 @@ def update_scoring_weights(
         db.add(weights)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(weights, field, value)
-    rescore_all_papers(db)
+    rescore_all_papers(db, compute_semantics=False)
     db.commit()
+    schedule_semantic_completion(db)
     db.refresh(weights)
     return weights
 

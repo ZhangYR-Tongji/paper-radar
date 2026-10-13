@@ -8,6 +8,7 @@ from app.api.router import api_router
 from app.core.config import get_settings
 from app.db.base import init_db
 from app.db.session import SessionLocal
+from app.services.semantic_jobs import needs_semantic_index, start_semantic_job
 
 settings = get_settings()
 
@@ -17,6 +18,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     db = SessionLocal()
     try:
         init_db(db)
+        if needs_semantic_index(db):
+            start_semantic_job()
     finally:
         db.close()
     yield

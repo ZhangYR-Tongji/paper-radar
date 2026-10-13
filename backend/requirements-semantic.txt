@@ -1,0 +1,4 @@
+# Optional CPU-only multilingual embeddings; no PyTorch or paid API is required.
+fastembed==0.9.0
+# Respect SOCKS proxies configured by local desktop environments during model download.
+httpx[socks]>=0.27,<1

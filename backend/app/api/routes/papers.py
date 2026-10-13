@@ -159,7 +159,7 @@ def _upsert_feedback(db: Session, paper_id: int, payload: FeedbackUpsert) -> dic
         previous_rating=previous_rating,
     )
     if preferences_changed:
-        rescore_all_papers(db)
+        rescore_all_papers(db, compute_semantics=False)
     db.commit()
     db.refresh(feedback)
     feature = db.query(PaperFeature).filter(PaperFeature.paper_id == paper_id).first()

@@ -43,3 +43,4 @@ class PaperFeature(IdMixin, TimestampMixin, Base):
     negative_filter_penalty = Column(Float, default=0.0, nullable=False)
     final_score = Column(Float, default=0.0, index=True, nullable=False)
     classification = Column(String(64), index=True, nullable=False)
+    semantic_details = Column(JSON, default=dict, nullable=False)
